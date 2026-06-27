@@ -22,7 +22,7 @@ DATASET_PREFIX  = os.environ["DATASET_PREFIX"]
 TRIGGER_WORD    = os.environ["TRIGGER_WORD"]
 LOCAL_DATASET_PATH = os.environ.get("LOCAL_DATASET_PATH", "")
 
-INSTANCE_TYPE   = "g6e.2xlarge"
+INSTANCE_TYPE   = "g6e.4xlarge"  # 128GB RAM needed: transformer (CPU) + Mistral-24B both in RAM during quantization
 PROFILE_NAME    = "flux-poc-ec2-instance-profile"
 SG_NAME         = "flux-poc-training-sg"
 ROLE_NAME       = "flux-poc-ec2-role"

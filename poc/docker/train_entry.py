@@ -65,6 +65,7 @@ def build_config(hp: dict) -> dict:
             "gradient_accumulation_steps": 4,
             "train_unet": True,
             "train_text_encoder": False,
+            "unload_text_encoder": True,   # precompute embeddings then move Mistral to CPU — frees ~24GB VRAM during training
             "lr": lr,
             "optimizer": "adamw8bit",
             "lr_scheduler": "cosine",
@@ -98,7 +99,9 @@ def build_config(hp: dict) -> dict:
             "caption_ext": "txt",
             "resolution": [1024, 1024],
             "default_caption": f"a character in {trigger_word} style",
-            "flip_aug": True,
+            "cache_latents_to_disk": True,    # precompute VAE latents
+            "cache_text_embeddings": True,    # precompute Mistral embeddings, then unload encoder
+            # flip_aug removed: augmentations are incompatible with latent caching
         }],
     }
 
