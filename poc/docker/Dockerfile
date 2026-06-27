@@ -1,4 +1,4 @@
-FROM public.ecr.aws/nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -10,21 +10,22 @@ RUN apt-get update && apt-get install -y \
     && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
     && ln -sf /usr/bin/python3.11 /usr/bin/python
 
-# PyTorch 2.4 + CUDA 12.1 — compatible with optimum-quanto 0.2.4 (PyTorch 2.6 breaks fake impl registration)
+# PyTorch 2.6 + CUDA 12.4
 RUN pip3 install --no-cache-dir \
-    "torch==2.4.1+cu121" "torchvision==0.19.1+cu121" "torchaudio==2.4.1+cu121" \
-    --index-url https://download.pytorch.org/whl/cu121
+    "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" "torchaudio==2.6.0+cu124" \
+    --index-url https://download.pytorch.org/whl/cu124
 
 # ai-toolkit: pinned to 75781fb — last known-good commit for FLUX.2-dev (issue #872)
+# Pin torchao to 0.7.0 to avoid pulling torch 2.6 deps that break optimum-quanto 0.2.4
+# Pin optimum-quanto to 0.2.6 — last version before mandatory torch 2.6 requirement
 RUN git clone https://github.com/ostris/ai-toolkit /ai-toolkit && \
     cd /ai-toolkit && git checkout 75781fb && \
-    pip3 install --no-cache-dir -r requirements.txt
-
-# Force torch back to 2.4 — torchao==0.10.0 in requirements.txt upgrades torch to 2.6
-# which breaks optimum-quanto 0.2.4's fake impl registration
-RUN pip3 install --no-cache-dir --force-reinstall \
-    "torch==2.4.1+cu121" "torchvision==0.19.1+cu121" "torchaudio==2.4.1+cu121" \
-    --index-url https://download.pytorch.org/whl/cu121
+    pip3 install --no-cache-dir \
+        "torchao==0.7.0" \
+        "optimum-quanto==0.2.6" && \
+    pip3 install --no-cache-dir \
+        --ignore-installed torch torchvision torchaudio \
+        -r requirements.txt
 
 # Runtime packages
 RUN pip3 install --no-cache-dir boto3 wandb
