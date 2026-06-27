@@ -53,10 +53,11 @@ def build_config(hp: dict) -> dict:
         "output_folder": OUTPUT_PATH,
         "device": "cuda:0",
         "model": {
+            "arch": "flux2",            # use ai-toolkit's dedicated Flux2Model (meta-device load + assign weights)
             "name_or_path": model_name,
-            "is_flux": True,
-            "quantize": True,
-            "low_vram": True,   # FLUX.2-dev requires low_vram=True: from_pretrained uses meta device, direct .to() fails
+            "quantize": True,           # fp8 quantize transformer
+            "quantize_te": True,        # fp8 quantize Mistral-Small-3.1-24B text encoder
+            "low_vram": True,           # keep transformer on CPU during quantization (L40S 48GB headroom)
         },
         "train": {
             "batch_size": 1,

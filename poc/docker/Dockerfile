@@ -15,10 +15,12 @@ RUN pip3 install --no-cache-dir \
     "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" "torchaudio==2.6.0+cu124" \
     --index-url https://download.pytorch.org/whl/cu124
 
-# ai-toolkit pinned to 75781fb; install requirements first then force optimum-quanto to 0.2.7
-# (requirements.txt pins optimum-quanto==0.2.4, so we must upgrade AFTER)
+# ai-toolkit main branch — has dedicated Flux2Model (arch: flux2) with proper
+# meta-device load + assign-weights handling for FLUX.2-dev. Do NOT pin to 75781fb
+# (predates flux2 support). Upgrade optimum-quanto to 0.2.7 (--no-deps to keep torch 2.6)
+# since requirements pins 0.2.4 which breaks fake-impl registration on torch 2.6.
 RUN git clone https://github.com/ostris/ai-toolkit /ai-toolkit && \
-    cd /ai-toolkit && git checkout 75781fb && \
+    cd /ai-toolkit && \
     pip3 install --no-cache-dir -r requirements.txt && \
     pip3 install --no-cache-dir --force-reinstall --no-deps "optimum-quanto==0.2.7"
 
