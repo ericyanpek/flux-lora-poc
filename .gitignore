@@ -5,6 +5,9 @@ eric-research/
 # Memory files (local session state)
 memory/
 
+# Training dataset (local only, lives in S3)
+poc/dataset/
+
 # Training results (large files, local only)
 poc/results/
 
