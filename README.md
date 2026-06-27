@@ -4,7 +4,7 @@
 
 ## 目标
 
-验证 FLUX.2-dev（Gemma 3 12B 文本编码器）的 LoRA 微调是否能在单卡 L40S 上完成，并与 FLUX.1-dev 的生成质量做对比。
+验证 FLUX.2-dev（Mistral-3 24B 视觉语言模型作文本编码器）的 LoRA 微调是否能在单卡 L40S 上完成，并与 FLUX.1-dev 的生成质量做对比。
 
 ## 架构
 
