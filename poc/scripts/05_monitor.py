@@ -8,11 +8,9 @@ import argparse
 import boto3
 import time
 from pathlib import Path
+from config import REGION, TRAINING_REGION, BUCKET
 
-ACCOUNT = "984072314535"
-REGION = "us-east-1"
-BUCKET = f"flux-poc-{ACCOUNT}-{REGION}"
-RESULTS_DIR = Path("/Users/yabolin/claude-code/flux/poc/results")
+RESULTS_DIR = Path(__file__).parent.parent / "results"
 STATE_FILE = Path("/tmp/last_flux_ec2_job.txt")
 
 
@@ -26,7 +24,7 @@ def read_state_file() -> tuple:
 
 
 def poll_until_stopped(instance_id: str) -> str:
-    ec2 = boto3.client("ec2", region_name=REGION)
+    ec2 = boto3.client("ec2", region_name=TRAINING_REGION)
     print(f"Monitoring EC2 instance: {instance_id}")
     print("Polling every 60s. Ctrl+C stops polling (instance continues running).\n")
 
@@ -120,7 +118,6 @@ if __name__ == "__main__":
     if status.startswith("FAILED"):
         code = status.split(":", 1)[-1]
         print(f"\nTraining failed with exit code {code}.")
-        print(f"Check logs: https://console.aws.amazon.com/cloudwatch/home?region={REGION}#logsV2:log-groups")
         print(f"Or SSM into instance {instance_id} and read /var/log/flux-training.log")
     else:
         local_dir = download_results(job_id)

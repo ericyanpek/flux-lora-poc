@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ACCOUNT="984072314535"
-REGION="us-east-1"
-ECR_REPO="flux-poc-training"
-ECR_URI="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${ECR_REPO}"
+# Load config from .env
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -a && source "$SCRIPT_DIR/../.env" && set +a
+
+ECR_URI="${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/flux-poc-training"
 TAG="latest"
 
-echo "-> ECR auth via docker-credential-ecr-login (credHelpers configured)..."
-# No explicit docker login needed — ~/.docker/config.json uses credHelpers for ECR
+echo "-> ECR auth..."
+aws ecr get-login-password --region "${AWS_REGION}" | \
+  docker login --username AWS --password-stdin "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 echo "-> Building image (this takes 10-20 minutes)..."
 docker build \
   --platform linux/amd64 \
   -t "${ECR_URI}:${TAG}" \
-  /Users/yabolin/claude-code/flux/poc/docker/
+  "$SCRIPT_DIR/../docker/"
 
 echo "-> Pushing image to ECR..."
 docker push "${ECR_URI}:${TAG}"

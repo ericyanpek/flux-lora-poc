@@ -9,25 +9,13 @@ import boto3
 import datetime
 import os
 import time
+from config import (
+    ACCOUNT, REGION as S3_REGION, TRAINING_REGION, BUCKET, ECR_URI,
+    AMI_ID, INSTANCE_TYPE, PROFILE_NAME, SG_NAME, SUBNET_CANDIDATES, DATASET_PREFIX,
+)
 
-ACCOUNT = "984072314535"
-REGION = "us-west-2"
-S3_REGION = "us-east-1"                                        # bucket stays in us-east-1
-BUCKET = f"flux-poc-{ACCOUNT}-{S3_REGION}"
-ECR_REGION = "us-east-1"                                       # ECR repo stays in us-east-1
-ECR_URI = f"{ACCOUNT}.dkr.ecr.{ECR_REGION}.amazonaws.com/flux-poc-training:latest"
-AMI_ID = "ami-0ca70308d230e8a6e"                               # Deep Learning AMI PyTorch 2.7 Ubuntu 22.04 us-west-2
-INSTANCE_TYPE = "g6e.2xlarge"
-PROFILE_NAME = "flux-poc-ec2-instance-profile"
-SG_NAME = "flux-poc-training-sg"
-
-# us-west-2 default subnets — all in same VPC vpc-0037a5b2caec391c3
-SUBNET_CANDIDATES = [
-    "subnet-0ab05ee49b70a8ff5",  # us-west-2a
-    "subnet-09a403aeabf53c38e",  # us-west-2b
-    "subnet-0b7104c30b7984b83",  # us-west-2c
-    "subnet-0188efa796228cb29",  # us-west-2d
-]
+REGION = TRAINING_REGION
+ECR_REGION = S3_REGION
 
 
 def get_or_create_security_group(ec2, vpc_id: str) -> str:
@@ -53,7 +41,7 @@ def get_or_create_security_group(ec2, vpc_id: str) -> str:
 
 
 def build_userdata(job_id: str, has_wandb: bool) -> str:
-    wandb_fetch = 'WANDB_API_KEY=$(aws ssm get-parameter --region {SSM_REGION} --name /flux-poc/wandb-key --with-decryption --query Parameter.Value --output text 2>/dev/null || echo "")'.format(SSM_REGION="us-east-1") if has_wandb else 'WANDB_API_KEY=""'
+    wandb_fetch = f'WANDB_API_KEY=$(aws ssm get-parameter --region {ECR_REGION} --name /flux-poc/wandb-key --with-decryption --query Parameter.Value --output text 2>/dev/null || echo "")' if has_wandb else 'WANDB_API_KEY=""'
     script = f"""#!/bin/bash
 set -euo pipefail
 exec > /var/log/flux-training.log 2>&1
@@ -61,9 +49,8 @@ exec > /var/log/flux-training.log 2>&1
 JOB_ID="{job_id}"
 BUCKET="{BUCKET}"
 ECR_URI="{ECR_URI}"
-INSTANCE_REGION="{REGION}"
 ECR_REGION="{ECR_REGION}"
-SSM_REGION="us-east-1"
+SSM_REGION="{ECR_REGION}"
 
 echo "=== FLUX.2-dev LoRA Training: $JOB_ID ==="
 
@@ -71,11 +58,11 @@ echo "=== FLUX.2-dev LoRA Training: $JOB_ID ==="
 systemctl start docker || true
 sleep 5
 
-# Fetch secrets from SSM (stored in us-east-1)
+# Fetch secrets from SSM
 HF_TOKEN=$(aws ssm get-parameter --region $SSM_REGION --name /flux-poc/hf-token --with-decryption --query Parameter.Value --output text)
 {wandb_fetch}
 
-# ECR login (ECR repo is in us-east-1)
+# ECR login
 aws ecr get-login-password --region $ECR_REGION | docker login --username AWS --password-stdin {ACCOUNT}.dkr.ecr.$ECR_REGION.amazonaws.com
 
 # Pull training image
@@ -83,7 +70,7 @@ docker pull $ECR_URI
 
 # Sync dataset from S3
 mkdir -p /tmp/training-data /tmp/output
-aws s3 sync s3://$BUCKET/datasets/poc-character-v1/ /tmp/training-data/
+aws s3 sync s3://$BUCKET/{DATASET_PREFIX} /tmp/training-data/
 echo "Dataset synced: $(ls /tmp/training-data | wc -l) files"
 
 # Run training
@@ -106,33 +93,31 @@ else
   echo "Training FAILED with exit code $EXIT_CODE"
 fi
 
-# Upload results regardless of exit code (partial results useful for debugging)
+# Upload results regardless of exit code
 aws s3 sync /tmp/output/ s3://$BUCKET/outputs/$JOB_ID/
-
 echo "Results uploaded to s3://$BUCKET/outputs/$JOB_ID/"
 
 if [ $EXIT_CODE -eq 0 ]; then
-  echo "Training succeeded. Shutting down..."
+  echo "Shutting down..."
   shutdown -h now
 else
-  echo "Training FAILED. Instance kept running for debugging. Check /var/log/flux-training.log"
+  echo "Instance kept running for debugging. Check /var/log/flux-training.log"
 fi
 """
     return base64.b64encode(script.encode()).decode()
 
 
 def launch_instance(hf_token: str, wandb_key: str) -> tuple:
-    ssm = boto3.client("ssm", region_name="us-east-1")  # SSM params stored in us-east-1, read cross-region by UserData
+    ssm = boto3.client("ssm", region_name=ECR_REGION)
     ssm.put_parameter(Name="/flux-poc/hf-token", Value=hf_token, Type="SecureString", Overwrite=True)
     if wandb_key:
         ssm.put_parameter(Name="/flux-poc/wandb-key", Value=wandb_key, Type="SecureString", Overwrite=True)
-    print("Secrets stored in SSM Parameter Store (us-east-1)")
+    print(f"Secrets stored in SSM Parameter Store ({ECR_REGION})")
 
     ec2 = boto3.client("ec2", region_name=REGION)
 
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     job_id = f"flux2-lora-ec2-{ts}"
-
     userdata = build_userdata(job_id, bool(wandb_key))
 
     resp = None
@@ -189,7 +174,7 @@ def launch_instance(hf_token: str, wandb_key: str) -> tuple:
     instance_id = resp["Instances"][0]["InstanceId"]
     print(f"✅ EC2 instance launched: {instance_id}")
     print(f"   Job ID:  {job_id}")
-    print(f"   Type:    {INSTANCE_TYPE} (L40S 48GB, 16 vCPU)")
+    print(f"   Type:    {INSTANCE_TYPE} (L40S 48GB)")
     print(f"   Monitor: https://console.aws.amazon.com/ec2/home?region={REGION}#Instances:instanceId={instance_id}")
     if wandb_key:
         print(f"   W&B:     https://wandb.ai (project: flux2-lora-poc)")

@@ -5,11 +5,7 @@ One-time cleanup of SageMaker POC leftovers.
 Run: python3 00_cleanup_sagemaker.py
 """
 import boto3
-
-ACCOUNT = "984072314535"
-REGION = "us-east-1"
-ECR_REPO = "flux-poc-training"
-SM_ROLE_NAME = "AmazonSageMaker-ExecutionRole-20250207T115166"
+from config import REGION, ECR_REPO, SM_ROLE_NAME
 
 
 def cleanup_ecr_old_images():
@@ -17,7 +13,6 @@ def cleanup_ecr_old_images():
     paginator = ecr.get_paginator("describe_images")
     images = [img for page in paginator.paginate(repositoryName=ECR_REPO) for img in page["imageDetails"]]
 
-    # find the digest tagged as 'latest'
     latest_digest = None
     for img in images:
         if "latest" in img.get("imageTags", []):
