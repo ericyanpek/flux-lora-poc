@@ -4,10 +4,15 @@ env:
   variables:
     AWS_ACCOUNT: ""
     AWS_REGION: ""
+  secrets-manager:
+    DOCKERHUB_USER: /flux-poc/dockerhub:username
+    DOCKERHUB_PASS: /flux-poc/dockerhub:password
 
 phases:
   pre_build:
     commands:
+      - echo "Logging in to Docker Hub..."
+      - echo "$DOCKERHUB_PASS" | docker login --username "$DOCKERHUB_USER" --password-stdin
       - echo "Logging in to ECR..."
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
   build:
