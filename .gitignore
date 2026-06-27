@@ -1,0 +1,18 @@
+# Local research and reference files
+2026-06-25-flux-lora-finetuning-poc/
+eric-research/
+
+# Memory files (local session state)
+memory/
+
+# Training results (large files, local only)
+poc/results/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# macOS
+.DS_Store
