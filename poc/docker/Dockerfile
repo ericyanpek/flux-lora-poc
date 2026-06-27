@@ -30,6 +30,11 @@ RUN pip3 install --no-cache-dir boto3 wandb
 # scipy 1.12.0 (pinned by ai-toolkit) requires numpy<2; force-downgrade if needed
 RUN pip3 install --no-cache-dir "numpy<2"
 
+# Patch flux2_model.py: quantize Mistral text encoder on CPU before moving to GPU
+# (upstream moves full 48GB bf16 encoder to GPU first → OOMs 46GB L40S)
+COPY patch_flux2_te.py /tmp/patch_flux2_te.py
+RUN python3 /tmp/patch_flux2_te.py
+
 ENV PYTHONPATH=/ai-toolkit
 WORKDIR /ai-toolkit
 
