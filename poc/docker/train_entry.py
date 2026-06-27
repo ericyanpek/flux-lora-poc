@@ -66,6 +66,7 @@ def build_config(hp: dict) -> dict:
             "train_unet": True,
             "train_text_encoder": False,
             "unload_text_encoder": True,   # precompute embeddings then move Mistral to CPU — frees ~24GB VRAM during training
+            "skip_first_sample": True,     # skip baseline sample before training (holds VRAM, causes OOM at prepare)
             "lr": lr,
             "optimizer": "adamw8bit",
             "lr_scheduler": "cosine",
@@ -85,8 +86,8 @@ def build_config(hp: dict) -> dict:
         },
         "sample": {
             "sample_every": sample_every,
-            "width": 1024,
-            "height": 1024,
+            "width": 768,
+            "height": 768,
             "prompts": sample_prompts,
             "neg": "",
             "seed": 42,
@@ -97,7 +98,7 @@ def build_config(hp: dict) -> dict:
         "datasets": [{
             "folder_path": TRAINING_DATA_PATH,
             "caption_ext": "txt",
-            "resolution": [1024, 1024],
+            "resolution": [768, 768],         # lowered from 1024 to reduce VRAM at prepare/train
             "default_caption": f"a character in {trigger_word} style",
             "cache_latents_to_disk": True,    # precompute VAE latents
             "cache_text_embeddings": True,    # precompute Mistral embeddings, then unload encoder
