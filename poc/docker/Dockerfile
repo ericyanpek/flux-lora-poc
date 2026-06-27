@@ -3,7 +3,8 @@ FROM 984072314535.dkr.ecr.us-east-1.amazonaws.com/flux-poc-base:12.4.1-cudnn-dev
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update -o Acquire::Retries=3 && \
+    apt-get install -y -o Acquire::Retries=3 \
     python3.11 python3.11-dev python3-pip \
     git wget curl libgl1 libglib2.0-0 libsndfile1 ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
