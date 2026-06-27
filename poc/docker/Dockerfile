@@ -20,7 +20,7 @@ RUN pip3 install --no-cache-dir \
 RUN git clone https://github.com/ostris/ai-toolkit /ai-toolkit && \
     cd /ai-toolkit && git checkout 75781fb && \
     pip3 install --no-cache-dir -r requirements.txt && \
-    pip3 install --no-cache-dir --force-reinstall "optimum-quanto==0.2.7"
+    pip3 install --no-cache-dir --force-reinstall --no-deps "optimum-quanto==0.2.7"
 
 # Runtime packages
 RUN pip3 install --no-cache-dir boto3 wandb
