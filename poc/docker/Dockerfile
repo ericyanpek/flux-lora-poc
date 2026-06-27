@@ -15,11 +15,12 @@ RUN pip3 install --no-cache-dir \
     "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" "torchaudio==2.6.0+cu124" \
     --index-url https://download.pytorch.org/whl/cu124
 
-# ai-toolkit pinned to 75781fb; upgrade optimum-quanto to 0.2.7 which officially supports PyTorch 2.6
+# ai-toolkit pinned to 75781fb; install requirements first then force optimum-quanto to 0.2.7
+# (requirements.txt pins optimum-quanto==0.2.4, so we must upgrade AFTER)
 RUN git clone https://github.com/ostris/ai-toolkit /ai-toolkit && \
     cd /ai-toolkit && git checkout 75781fb && \
-    pip3 install --no-cache-dir "optimum-quanto==0.2.7" && \
-    pip3 install --no-cache-dir -r requirements.txt
+    pip3 install --no-cache-dir -r requirements.txt && \
+    pip3 install --no-cache-dir --force-reinstall "optimum-quanto==0.2.7"
 
 # Runtime packages
 RUN pip3 install --no-cache-dir boto3 wandb
