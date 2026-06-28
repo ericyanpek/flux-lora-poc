@@ -23,6 +23,7 @@ TRIGGER_WORD    = os.environ["TRIGGER_WORD"]
 LOCAL_DATASET_PATH = os.environ.get("LOCAL_DATASET_PATH", "")
 
 INSTANCE_TYPE   = "g6e.4xlarge"  # 128GB RAM: transformer (CPU) + Mistral-24B during quantization. g7e (96GB VRAM) preferred but capacity-constrained
+PERSISTENT_INSTANCE_ID = os.environ.get("PERSISTENT_INSTANCE_ID", "")  # long-lived instance reused via stop/start
 PROFILE_NAME    = "flux-poc-ec2-instance-profile"
 SG_NAME         = "flux-poc-training-sg"
 ROLE_NAME       = "flux-poc-ec2-role"
