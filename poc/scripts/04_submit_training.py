@@ -69,9 +69,9 @@ aws ecr get-login-password --region $ECR_REGION | docker login --username AWS --
 # Pull training image
 docker pull $ECR_URI
 
-# Use instance-local NVMe for model cache (558GB, free, fast) — avoids EBS fill-up
-# and lets HF model cache (~90GB) persist across container restarts on same instance.
-HF_CACHE=/opt/dlami/nvme/hf-cache
+# Model cache on EBS (persistent across stop/start) — ~106GB FLUX.2+Mistral pre-downloaded.
+# EBS expanded to 350GB for this. Survives instance stop, so no 90GB re-download.
+HF_CACHE=/opt/flux-cache/hf
 mkdir -p /tmp/training-data /tmp/output $HF_CACHE
 
 # Sync dataset from S3
