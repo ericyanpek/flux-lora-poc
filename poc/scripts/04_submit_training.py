@@ -12,6 +12,7 @@ import time
 from config import (
     ACCOUNT, REGION as S3_REGION, TRAINING_REGION, BUCKET, ECR_URI,
     AMI_ID, INSTANCE_TYPE, PROFILE_NAME, SG_NAME, SUBNET_CANDIDATES, DATASET_PREFIX,
+    TRIGGER_WORD,
 )
 
 REGION = TRAINING_REGION
@@ -68,16 +69,28 @@ aws ecr get-login-password --region $ECR_REGION | docker login --username AWS --
 # Pull training image
 docker pull $ECR_URI
 
+# Use instance-local NVMe for model cache (558GB, free, fast) — avoids EBS fill-up
+# and lets HF model cache (~90GB) persist across container restarts on same instance.
+HF_CACHE=/opt/dlami/nvme/hf-cache
+mkdir -p /tmp/training-data /tmp/output $HF_CACHE
+
 # Sync dataset from S3
-mkdir -p /tmp/training-data /tmp/output
 aws s3 sync s3://$BUCKET/{DATASET_PREFIX} /tmp/training-data/
 echo "Dataset synced: $(ls /tmp/training-data | wc -l) files"
 
-# Run training
+# Run training.
+# --shm-size=24g: DataLoader workers need shared memory (default 64MB causes Bus error)
+# expandable_segments: reduce VRAM fragmentation (FLUX.2 prepare peak is near 46GB)
+# TRIGGER_WORD: passed through to ai-toolkit config
+# HF cache on NVMe so the ~90GB FLUX.2 + Mistral download survives container --rm
 set +e
-docker run --gpus all --rm \\
+docker run --gpus all --rm --shm-size=24g \\
   -e HF_TOKEN="$HF_TOKEN" \\
   -e WANDB_API_KEY="$WANDB_API_KEY" \\
+  -e TRIGGER_WORD="{TRIGGER_WORD}" \\
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \\
+  -e HF_HOME=/root/.cache/huggingface \\
+  -v $HF_CACHE:/root/.cache/huggingface \\
   -v /tmp/training-data:/opt/ml/input/data/training \\
   -v /tmp/output:/opt/ml/model \\
   $ECR_URI
@@ -93,8 +106,11 @@ else
   echo "Training FAILED with exit code $EXIT_CODE"
 fi
 
-# Upload results regardless of exit code
-aws s3 sync /tmp/output/ s3://$BUCKET/outputs/$JOB_ID/
+# Upload results. ai-toolkit writes LoRA weights + samples into the training_folder
+# subdir (flux-lora-poc/), NOT /opt/ml/model. Sync that, excluding bulky caches.
+aws s3 sync /tmp/training-data/flux-lora-poc/ s3://$BUCKET/outputs/$JOB_ID/ \\
+  --exclude "*_latent_cache/*" --exclude "*_t_e_cache/*"
+aws s3 sync /tmp/output/ s3://$BUCKET/outputs/$JOB_ID/ 2>/dev/null || true
 echo "Results uploaded to s3://$BUCKET/outputs/$JOB_ID/"
 
 if [ $EXIT_CODE -eq 0 ]; then
