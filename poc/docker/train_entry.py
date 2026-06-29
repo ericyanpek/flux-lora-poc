@@ -24,7 +24,7 @@ def load_hyperparameters():
             raw = json.load(f)
         hp = {k: v.strip('"') if isinstance(v, str) else v for k, v in raw.items()}
     # env vars override file (EC2 mode)
-    for key in ["trigger_word", "model_name", "steps", "lr", "rank", "sample_every"]:
+    for key in ["trigger_word", "model_name", "steps", "lr", "rank", "sample_every", "layer", "project_name"]:
         env_val = os.environ.get(key.upper())
         if env_val:
             hp[key] = env_val
@@ -40,16 +40,35 @@ def build_config(hp: dict) -> dict:
     model_name = hp.get("model_name", "black-forest-labs/FLUX.2-dev")
     wandb_key = os.environ.get("WANDB_API_KEY", "")
 
-    sample_prompts = [
-        f"a {trigger_word} character sitting on a beach, casual game style, vibrant colors",
-        f"a {trigger_word} character in a fantasy forest, detailed character art",
-        f"a {trigger_word} character portrait, close up, high quality",
-        "a character sitting on a beach, casual game style, vibrant colors",
-    ]
+    layer = hp.get("layer", "")
+    if layer == "style":
+        sample_prompts = [
+            f"{trigger_word}, a treasure chest full of gold coins",
+            f"{trigger_word}, a fierce dragon mascot",
+            f"{trigger_word}, a magic potion bottle icon",
+            "a treasure chest full of gold coins",
+        ]
+    elif layer == "char":
+        sample_prompts = [
+            f"{trigger_word}, on a beach with palm trees",
+            f"{trigger_word}, in a fantasy forest",
+            f"{trigger_word}, portrait close up",
+            "a character on a beach",
+        ]
+    else:
+        sample_prompts = [
+            f"a {trigger_word} character sitting on a beach, casual game style, vibrant colors",
+            f"a {trigger_word} character in a fantasy forest, detailed character art",
+            f"a {trigger_word} character portrait, close up, high quality",
+            "a character sitting on a beach, casual game style, vibrant colors",
+        ]
 
     process = {
         "type": "sd_trainer",
         "training_folder": TRAINING_DATA_PATH,
+        # NOTE: ai-toolkit ignores output_folder; actual artifacts go to
+        # training_folder/<config name>/ (= /opt/ml/input/data/training/flux-lora-poc/).
+        # ctl.py syncs from that path, not /opt/ml/model.
         "output_folder": OUTPUT_PATH,
         "device": "cuda:0",
         "model": {
@@ -99,7 +118,7 @@ def build_config(hp: dict) -> dict:
             "folder_path": TRAINING_DATA_PATH,
             "caption_ext": "txt",
             "resolution": [768, 768],         # lowered from 1024 to reduce VRAM at prepare/train
-            "default_caption": f"a character in {trigger_word} style",
+            "default_caption": f"{trigger_word}",
             "cache_latents_to_disk": True,    # precompute VAE latents
             "cache_text_embeddings": True,    # precompute Mistral embeddings, then unload encoder
             # flip_aug removed: augmentations are incompatible with latent caching
@@ -109,8 +128,8 @@ def build_config(hp: dict) -> dict:
     if wandb_key:
         process["logging"] = {
             "use_wandb": True,
-            "project": "flux2-lora-poc",
-            "run_name": trigger_word,
+            "project": hp.get("project_name", "flux2-lora-poc"),
+            "run_name": f"{layer or 'base'}-{trigger_word}",
         }
 
     return {

@@ -123,30 +123,36 @@ def _ensure_running():
 def cmd_train(args):
     _ensure_running()
     ts = time.strftime("%Y%m%d-%H%M%S")
-    job = f"slotip-{ts}"
-    steps_override = f"-e STEPS={args.steps}" if args.steps else ""
-    print(f"Launching training job {job} (steps={args.steps or 'default 1500'})...")
-    # 后台跑,不阻塞;日志写 /var/log
+    layer = getattr(args, "layer", None)
+    if layer == "style":
+        prefix, trigger, job = "datasets/slot-ip-v1-style/", "slotstyle", f"style-{ts}"
+    elif layer == "char":
+        prefix, trigger, job = "datasets/slot-ip-v1-char/", "slotchar", f"char-{ts}"
+    else:
+        prefix, trigger, job = DATASET_PREFIX, TRIGGER_WORD, f"slotip-{ts}"
+    steps_env = f"-e STEPS={args.steps}" if args.steps else ""
+    layer_env = f"-e LAYER={layer}" if layer else ""
+    print(f"Launching {job} (layer={layer or 'base'}, trigger={trigger}, steps={args.steps or 'default'})...")
     cmd = (
         f"bash -c 'exec >> /var/log/flux-train-{job}.log 2>&1; "
-        f"mkdir -p /tmp/td /tmp/out-{job} /opt/flux-cache/hf; "
-        f"aws s3 sync s3://{BUCKET}/{DATASET_PREFIX} /tmp/td/ >/dev/null 2>&1; "
+        f"mkdir -p /tmp/td-{job} /tmp/out-{job} /opt/flux-cache/hf; "
+        f"aws s3 sync s3://{BUCKET}/{prefix} /tmp/td-{job}/ >/dev/null 2>&1; "
         f"aws ecr get-login-password --region {S3_REGION} | docker login --username AWS --password-stdin {ECR_URI.split('/')[0]} >/dev/null 2>&1; "
         f"docker pull {ECR_URI} >/dev/null 2>&1; "
         f"HF=$(aws ssm get-parameter --region {S3_REGION} --name /flux-poc/hf-token --with-decryption --query Parameter.Value --output text); "
         f"WB=$(aws ssm get-parameter --region {S3_REGION} --name /flux-poc/wandb-key --with-decryption --query Parameter.Value --output text 2>/dev/null || echo \"\"); "
         f"docker run --gpus all --rm --shm-size=24g -e HF_TOKEN=\"$HF\" -e WANDB_API_KEY=\"$WB\" "
-        f"-e TRIGGER_WORD={TRIGGER_WORD} {steps_override} -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+        f"-e TRIGGER_WORD={trigger} {layer_env} {steps_env} -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
         f"-e HF_HOME=/root/.cache/huggingface -v /opt/flux-cache/hf:/root/.cache/huggingface "
-        f"-v /tmp/td:/opt/ml/input/data/training -v /tmp/out-{job}:/opt/ml/model {ECR_URI} 2>&1; "
+        f"-v /tmp/td-{job}:/opt/ml/input/data/training -v /tmp/out-{job}:/opt/ml/model {ECR_URI} 2>&1; "
         f"EXIT=$?; "
-        f"aws s3 sync /tmp/td/flux-lora-poc/ s3://{BUCKET}/outputs/{job}/ --exclude \"*_cache/*\" >/dev/null 2>&1; "
-        f"echo $([ $EXIT -eq 0 ] && echo SUCCESS || echo FAILED:$EXIT) | aws s3 cp - s3://{BUCKET}/outputs/{job}/status.txt' &"
+        f"aws s3 sync /tmp/td-{job}/flux-lora-poc/ s3://{BUCKET}/outputs/lora-{job}/ --exclude \"*_cache/*\" >/dev/null 2>&1; "
+        f"echo $([ $EXIT -eq 0 ] && echo SUCCESS || echo FAILED:$EXIT) | aws s3 cp - s3://{BUCKET}/outputs/lora-{job}/status.txt' &"
     )
     cid, _ = _ssm_run([cmd], wait=False)
     print(f"  job started (background). SSM cmd: {cid}")
     print(f"  watch:   python3 ctl.py logs train")
-    print(f"  results: s3://{BUCKET}/outputs/{job}/")
+    print(f"  results: s3://{BUCKET}/outputs/lora-{job}/")
 
 
 def cmd_infer(args):
@@ -184,6 +190,7 @@ if __name__ == "__main__":
     sub.add_parser("start")
     sub.add_parser("stop")
     pt = sub.add_parser("train"); pt.add_argument("--steps", type=int, default=None)
+    pt.add_argument("--layer", choices=["style", "char"], default=None)
     pi = sub.add_parser("infer"); pi.add_argument("prompt")
     pl = sub.add_parser("logs"); pl.add_argument("kind", nargs="?", choices=["train", "infer"])
     pr = sub.add_parser("run"); pr.add_argument("command")
