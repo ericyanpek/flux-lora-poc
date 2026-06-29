@@ -105,8 +105,8 @@ def build_config(hp: dict) -> dict:
         },
         "sample": {
             "sample_every": sample_every,
-            "width": 768,
-            "height": 768,
+            "width": 640,
+            "height": 640,
             "prompts": sample_prompts,
             "neg": "",
             "seed": 42,
@@ -117,7 +117,7 @@ def build_config(hp: dict) -> dict:
         "datasets": [{
             "folder_path": TRAINING_DATA_PATH,
             "caption_ext": "txt",
-            "resolution": [768, 768],         # lowered from 1024 to reduce VRAM at prepare/train
+            "resolution": [640, 640],         # 640 (was 768): more VRAM headroom on L40S 46GB, avoid prepare-stage OOM
             "default_caption": f"{trigger_word}",
             "cache_latents_to_disk": True,    # precompute VAE latents
             "cache_text_embeddings": True,    # precompute Mistral embeddings, then unload encoder
