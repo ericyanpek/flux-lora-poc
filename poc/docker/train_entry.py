@@ -81,7 +81,7 @@ def build_config(hp: dict) -> dict:
         "train": {
             "batch_size": 1,
             "steps": steps,
-            "gradient_accumulation_steps": 4,
+            "gradient_accumulation_steps": 1,   # 4->1: reduce prepare-stage VRAM (was OOM by 324MB on L40S 46GB)
             "train_unet": True,
             "train_text_encoder": False,
             "unload_text_encoder": True,   # precompute embeddings then move Mistral to CPU — frees ~24GB VRAM during training
