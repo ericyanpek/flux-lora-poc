@@ -10,8 +10,8 @@
 
 已跑通(POC):
 - 训练:ai-toolkit + FLUX.2-dev,EC2 g6e.4xlarge(L40S 46GB),CodeBuild→ECR 镜像,W&B 监控,SSM 存密钥,EBS 缓存 90GB 双模型
-- 产物:390MB rank-32 safetensors LoRA(slots 美术风格),存 S3
-- 已验证的关键约束:FLUX.2 = transformer(32B) + Mistral-Small-3.1-24B 编码器,**L40S 46GB 显存对训练和推理都极度吃紧**
+- 产物:390MB rank-32 safetensors LoRA(游戏美术风格),存 S3
+- 已验证的关键约束:FLUX.2 = transformer(32B) + Mistral-Small-3.x-24B 编码器(版本号说明见 README 脚注),**L40S 46GB 显存对训练和推理都极度吃紧**
 
 未做:推理服务、产物版本化、训练/推理协同、自动化。
 
@@ -67,7 +67,7 @@
 
 - `load_lora_weights(path, adapter_name=...)` 加载 → `set_adapters(...)` 切换/混合
 - **hotswap**:`load_lora_weights(..., hotswap=True)` + `enable_lora_hotswap(target_rank=32)`(compile 后不重编译),FLUX LoRA 在 H100 上 7.89s→3.55s([HF lora-fast](https://huggingface.co/blog/lora-fast))
-- **两个硬限制**:① hotswap 不支持 text-encoder LoRA;② 后续 LoRA 的 target 层须是首个的子集,先加载 target 最多的。你的 slots LoRA 若只作用 transformer 则完全 OK
+- **两个硬限制**:① hotswap 不支持 text-encoder LoRA;② 后续 LoRA 的 target 层须是首个的子集,先加载 target 最多的。当前游戏美术 LoRA 训练含 CLIP/TE 侧(`strength_clip>0`),生产化前需确认改为 transformer-only,否则 hotswap 路径不成立(待验证项)
 - 出处:[diffusers PEFT 推理](https://huggingface.co/docs/diffusers/main/en/tutorials/using_peft_for_inference)
 
 ### 显存与冷启动
@@ -84,6 +84,11 @@
 ---
 
 ## 四、协同:LoRA 产物管理与分发(你最看重的核心)
+
+> **实现状态(2026-07-06)**:本节是**生产化目标设计,尚未实现**。当前训练↔推理的实际协调契约是
+> `07_deploy_comfyui.py` 的 **latest-SUCCESS-by-S3-LastModified** 扫描(过滤 `status.txt==SUCCESS`,
+> 按 S3 LastModified 取最新,缺失则硬报错)——一个刻意精简的 POC 契约,尚无 W&B Artifacts 注册、
+> manifest JSON、SSM 指针或 hotswap。下文的三件套/灰度/回滚是演进方向,不代表已落地。
 
 ### 架构决策:不引入重型 Registry
 

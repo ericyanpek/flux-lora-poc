@@ -114,25 +114,48 @@ fetch_model \
     "split_files/vae/flux2-vae.safetensors"
 
 # LoRAs from training outputs (S3 only — no HF fallback).
-# Resolve the LATEST run per layer instead of a hardcoded timestamp, so a new
-# training run is picked up with no code change. ai-toolkit writes each run to
-# outputs/lora-<layer>-<timestamp>/flux-lora-poc.safetensors; the prefixes sort
-# lexicographically by timestamp, so `sort | tail -1` = newest.
-# (MVP for the manifest+SSM-pointer contract in docs/architecture/dual-stack-plan.md.)
-echo "Resolving latest LoRA runs from S3..."
+# Resolve the latest SUCCESSFUL run per layer, so a new training run is picked up
+# with no code change. ai-toolkit writes each run to
+# outputs/lora-<layer>-<timestamp>/{flux-lora-poc.safetensors, status.txt}.
+#
+# CURRENT CONTRACT (POC): latest-SUCCESS-by-S3-LastModified. This is the actual
+# training→inference coordination mechanism today. The W&B Artifacts + S3 manifest
+# + SSM pointer registry described in docs/architecture/dual-stack-plan.md is the
+# ASPIRATIONAL production design, not yet implemented.
+#
+# Safety over the naive "sort | tail -1":
+#   1. Skip runs whose status.txt != SUCCESS (a failed run's partial output must
+#      never be auto-promoted).
+#   2. Order by S3 LastModified (monotonic, API-provided) rather than parsing the
+#      timestamp out of the prefix name (which assumes single-writer/same-timezone).
+#   3. Missing LoRA is a HARD ERROR (exit 1) unless ALLOW_BASE=1 — a ComfyUI that
+#      silently came up with no adapter is worse than a loud failure.
+echo "Resolving latest SUCCESSFUL LoRA runs from S3..."
 fetch_latest_lora() {{
     local LAYER="$1"       # style | char
     local DEST="$2"
-    local PREFIX
-    PREFIX=$(aws s3 ls "s3://$BUCKET/outputs/" | awk '{{print $2}}' \
-        | grep "^lora-$LAYER-" | sort | tail -1)
-    if [ -z "$PREFIX" ]; then
-        echo "WARN: no lora-$LAYER-* run found in s3://$BUCKET/outputs/, skipping"
-        return
+    # List run prefixes for this layer, newest-first by LastModified.
+    local PREFIXES
+    PREFIXES=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "outputs/lora-$LAYER-" \
+        --query 'reverse(sort_by(Contents,&LastModified))[].Key' --output text 2>/dev/null \
+        | tr '\t' '\n' | grep '/status.txt$' | sed 's#/status.txt$##')
+    local RUN
+    for RUN in $PREFIXES; do
+        local ST
+        ST=$(aws s3 cp "s3://$BUCKET/$RUN/status.txt" - 2>/dev/null)
+        if [ "$ST" = "SUCCESS" ]; then
+            echo "Latest SUCCESS $LAYER LoRA: $RUN"
+            aws s3 cp "s3://$BUCKET/$RUN/flux-lora-poc.safetensors" "$DEST"
+            return 0
+        fi
+        echo "  skip $RUN (status=$ST)"
+    done
+    if [ "${{ALLOW_BASE:-0}}" = "1" ]; then
+        echo "WARN: no successful lora-$LAYER-* run; ALLOW_BASE=1 set, continuing without $LAYER LoRA"
+        return 0
     fi
-    echo "Latest $LAYER LoRA: $PREFIX"
-    aws s3 cp "s3://$BUCKET/outputs/${{PREFIX}}flux-lora-poc.safetensors" "$DEST" \
-        || echo "WARN: $LAYER LoRA object missing in $PREFIX, skipping"
+    echo "ERROR: no successful lora-$LAYER-* run found in s3://$BUCKET/outputs/ (set ALLOW_BASE=1 to run base-only)"
+    exit 1
 }}
 fetch_latest_lora "style" "models/loras/slotstyle.safetensors"
 fetch_latest_lora "char"  "models/loras/slotchar.safetensors"

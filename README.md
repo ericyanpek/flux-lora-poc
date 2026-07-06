@@ -137,10 +137,10 @@ python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo # 出
 
 ## 双栈架构规划
 
-📐 [`docs/architecture/dual-stack-plan.md`](docs/architecture/dual-stack-plan.md)
+📐 [`docs/architecture/dual-stack-plan.md`](docs/architecture/dual-stack-plan.md)(**生产化目标设计,部分尚未实现**)
 
 - **文本编码器解耦**:将 Mistral-24B 拆为独立可调度单元,同解训练显存、推理显存与推理扩缩容。
-- **产物协同**:W&B Artifacts(注册 + 血缘 + alias)+ S3 manifest + SSM 指针 + diffusers hotswap,全复用现有栈。
+- **产物协同**(规划):W&B Artifacts + S3 manifest + SSM 指针 + diffusers hotswap。*当前实际契约是 `07_deploy_comfyui.py` 的 latest-SUCCESS-by-timestamp S3 扫描,manifest/SSM 尚未实现。*
 - **推理框架**:FastAPI + diffusers(MVP)→ Ray Serve / Triton(规模化);vLLM 不适用扩散模型。
 - **扩缩容**:SageMaker Async(MVP)→ EKS + Karpenter + KEDA(规模化);HPA 不适用 GPU。
 

@@ -10,7 +10,7 @@ flux ctl — 一条命令管理 FLUX.2 训练/推理实例的生命周期。
   python3 ctl.py stop                   # 停止实例(省钱;EBS+模型缓存保留)
   python3 ctl.py train [--steps N]      # 在实例上跑训练(用 SLOTIP 数据集)
   python3 ctl.py infer ["<prompt>"]     # 推理不在训练机做 → 指引到 ComfyUI 推理机
-  python3 ctl.py logs [train|infer]     # 看最近日志
+  python3 ctl.py logs                   # 看训练日志
   python3 ctl.py run "<shell command>"  # 在实例上执行任意命令
 
 约定:实例 ID、region 从 poc/.env 读取(PERSISTENT_INSTANCE_ID / TRAINING_REGION)。
@@ -146,12 +146,15 @@ def cmd_train(args):
         f"-e HF_HOME=/root/.cache/huggingface -v /opt/flux-cache/hf:/root/.cache/huggingface "
         f"-v /tmp/td-{job}:/opt/ml/input/data/training -v /tmp/out-{job}:/opt/ml/model {ECR_URI} 2>&1; "
         f"EXIT=$?; "
-        f"aws s3 sync /tmp/td-{job}/flux-lora-poc/ s3://{BUCKET}/outputs/lora-{job}/ --exclude \"*_cache/*\" >/dev/null 2>&1; "
-        f"echo $([ $EXIT -eq 0 ] && echo SUCCESS || echo FAILED:$EXIT) | aws s3 cp - s3://{BUCKET}/outputs/lora-{job}/status.txt' &"
+        # 输出 sync 的成功与否也要反映进 status —— 训练成功但 LoRA 没上传到 S3 = 对下游无意义。
+        # 只有 容器退出 0 且 sync 退出 0 才算 SUCCESS;否则记 FAILED:<train_exit>:<sync_exit>。
+        f"aws s3 sync /tmp/td-{job}/flux-lora-poc/ s3://{BUCKET}/outputs/lora-{job}/ --exclude \"*_cache/*\"; "
+        f"SYNC=$?; "
+        f"echo $([ $EXIT -eq 0 ] && [ $SYNC -eq 0 ] && echo SUCCESS || echo FAILED:$EXIT:$SYNC) | aws s3 cp - s3://{BUCKET}/outputs/lora-{job}/status.txt' &"
     )
     cid, _ = _ssm_run([cmd], wait=False)
     print(f"  job started (background). SSM cmd: {cid}")
-    print(f"  watch:   python3 ctl.py logs train")
+    print(f"  watch:   python3 ctl.py logs")
     print(f"  results: s3://{BUCKET}/outputs/lora-{job}/")
 
 
@@ -171,8 +174,8 @@ def cmd_infer(args):
 
 def cmd_logs(args):
     _ensure_running()
-    kind = args.kind or "train"
-    pat = "flux-train-" if kind == "train" else "pirate-infer"
+    # 只有训练在这台机器上跑;推理在独立 ComfyUI 机(见 cmd_infer)。
+    pat = "flux-train-"
     status, out = _ssm_run([
         f"ls -t /var/log/{pat}*.log 2>/dev/null | head -1 | xargs -r tail -40 | grep -viE 'Downloading|[0-9]+%\\|' || echo 'no logs'",
     ], timeout=60)
@@ -197,7 +200,7 @@ if __name__ == "__main__":
     pt = sub.add_parser("train"); pt.add_argument("--steps", type=int, default=None)
     pt.add_argument("--layer", choices=["style", "char"], default=None)
     pi = sub.add_parser("infer"); pi.add_argument("prompt", nargs="?", default=None)
-    pl = sub.add_parser("logs"); pl.add_argument("kind", nargs="?", choices=["train", "infer"])
+    sub.add_parser("logs")   # 训练日志(推理在独立 ComfyUI 机)
     pr = sub.add_parser("run"); pr.add_argument("command")
     args = p.parse_args()
     {

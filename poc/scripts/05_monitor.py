@@ -119,6 +119,7 @@ if __name__ == "__main__":
         code = status.split(":", 1)[-1]
         print(f"\nTraining failed with exit code {code}.")
         print(f"Or SSM into instance {instance_id} and read /var/log/flux-training.log")
+        raise SystemExit(1)   # 非零退出,便于 CI/自动化据此判定失败
     else:
         local_dir = download_results(job_id)
         print_summary(local_dir)

@@ -1,4 +1,7 @@
 """
+⚠️ KNOWN-FAILED（保留作探索记录）：此路径在 46GB L40S 上 segfault/OOM，不可用。
+   可靠的推理路径是 inference/comfy_gen.py（独立 ComfyUI + 官方 fp8 底模）。
+
 Minimal FLUX.2 + LoRA inference using ai-toolkit's loader (same path as training).
 Loads base model once, applies the LoRA, generates pirate-theme images for
 multiple checkpoints so we can compare. Runs INSIDE the training container.

@@ -1,6 +1,9 @@
 """
-单 LoRA Demo 出图 —— 用 ai-toolkit 的 StableDiffusion loader(已验证 46GB 可用路径)。
-加载 base FLUX.2 + 一个 LoRA,对一批 slots 主题 prompt 出图。
+⚠️ KNOWN-FAILED(保留作探索记录):此路径在 46GB L40S 上 segfault,不可用。
+   可靠的推理路径是 inference/comfy_gen.py(独立 ComfyUI + 官方 fp8 底模)。
+
+单 LoRA Demo 出图 —— 用 ai-toolkit 的 StableDiffusion loader。
+加载 base FLUX.2 + 一个 LoRA,对一批游戏美术主题 prompt 出图。
 用于展示单层 LoRA(style 或 char)的效果。
 
 Run INSIDE the training container:

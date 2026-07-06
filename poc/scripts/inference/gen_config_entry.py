@@ -1,6 +1,9 @@
 """
+⚠️ KNOWN-FAILED(保留作探索记录):此路径在 46GB L40S 上 Mistral .to() OOM,不可用。
+   可靠的推理路径是 inference/comfy_gen.py(独立 ComfyUI + 官方 fp8 底模)。
+
 用 ai-toolkit 训练入口的 SAME 路径出图(sd_trainer + steps=0 + skip_first_sample=False)。
-这样走的是已验证的 Flux2Model 加载(和训练完全相同),规避通用 StableDiffusion / diffusers
+走 Flux2Model 加载(和训练完全相同),规避通用 StableDiffusion / diffusers
 Flux2Pipeline 在 46GB 上的段错误。
 
 通过 env 传入:

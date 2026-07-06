@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 用现有 18 张 slots 图,通过两套 caption 训出解耦的 Style + Character LoRA,并用网格实验验证多层组合的权重/冲突,产出可量化的推荐配置。
+**Goal:** 用现有 18 张游戏美术图,通过两套 caption 训出解耦的 Style + Character LoRA,并用网格实验验证多层组合的权重/冲突,产出可量化的推荐配置。
 
 **Architecture:** 复用现有训练链路(ctl.py + CodeBuild 镜像 + arch:flux2)。新增:① 分层数据准备脚本(同图两套 caption)② train_entry 参数化(支持 layer 配置)③ 组合实验脚本(diffusers 网格扫描 + per-concept 评估)。
 

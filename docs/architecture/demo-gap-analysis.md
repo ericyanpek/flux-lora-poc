@@ -1,5 +1,12 @@
 # 客户 Demo 目标 — 差距分析与实施路线
 
+> ⚠️ **状态更新(2026-07-06)**:本文档为 **2026-06-29 的早期差距分析**,部分标为"要做/未实现"的能力现已完成并有产物。以最新为准:
+> - 分层 LoRA(Style + Character)训练 **✅ 已完成** → 见 [实验报告](../experiments/layered-lora-results.md)
+> - 多层组合 **✅ 已完成**(ComfyUI `LoraLoader` 加权叠加)→ 见实验报告对照矩阵
+> - 独立推理服务 **✅ 已跑通**(ComfyUI 独立机)→ 见 `poc/scripts/07_deploy_comfyui.py`
+> - 原生多参考图 **🟡 部分验证**(身份保持 ✅ / 场景跟随待调优)
+> 下文的能力现状表(第 45 行起)保留作历史记录,请对照上述更新阅读。
+
 > 目标:为客户构建**企业级游戏美术 AI 生产平台 Demo**(不只是训一个模型)。FLUX.2 + 多层 LoRA(Style/UI/Character),保持美术风格/UI/Icon/IP 角色一致性,快速生成新资产。
 > 本文档 = 对照三大 Demo 目标的"已有 / 要做 / 风险",带技术验证依据。日期 2026-06-29。
 
@@ -36,13 +43,13 @@
 | FLUX.1 对比基线 | ❌ 无 | 客户说可忽略对比 FLUX.1 本身,但**展示 FLUX.2 的提升点**仍需准备对照样图 |
 | 对比维度样图 | ❌ 无 | 需准备:同 prompt 下 Prompt Follow、多元素生成、角色一致性(用多参考图)的展示图 |
 
-**要做**:准备一组"能力展示"样图(不必真跑 FLUX.1),用 FLUX.2 展示:复杂 prompt 跟随、一次生成多个 slots 元素、用多参考图保持角色。客户已有李佳基于 FLUX.1 的旧案例作演进叙事。
+**要做**:准备一组"能力展示"样图(不必真跑 FLUX.1),用 FLUX.2 展示:复杂 prompt 跟随、一次生成多个游戏美术元素、用多参考图保持角色。可结合客户已有的 FLUX.1 旧案例作演进叙事。
 
 ### 目标 2:训练流程展示(资产 → 清洗/标注 → LoRA FT → 评估 → Registry)
 
 | 环节 | 现状 | 差距 |
 |------|------|------|
-| 游戏美术资产数据 | 🟡 仅 18 张 slots 图 | 需扩充,且按 Style/UI/Character 分类组织 |
+| 游戏美术资产数据 | 🟡 仅 18 张游戏美术图 | 需扩充,且按 Style/UI/Character 分类组织 |
 | **数据清洗/自动标注** | ❌ 手工 caption | ai-toolkit 内置 **Qwen3-VL captioner**(角色/背景)+ **Ideogram4 结构化标注**(UI/icon,带 bbox)——[出处](https://deepwiki.com/ostris/ai-toolkit/20.2-captioner-backends)。需接入自动标注流程 |
 | LoRA Fine-tuning | ✅ 跑通(单 LoRA) | 需扩展到**分层训练**(Style/UI/Character 各一个数据集+trigger word) |
 | **模型评估** | ❌ 无 | 需评测门禁:CLIP score(trigger 契合)+ 角色一致性 + 黑图检测([diffusers 评测](https://huggingface.co/docs/diffusers/main/en/conceptual/evaluation)) |
