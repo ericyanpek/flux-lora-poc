@@ -51,11 +51,16 @@ S3_REGION="{S3_REGION}"
 HF_TOKEN=$(aws ssm get-parameter --region $S3_REGION --name /flux-poc/hf-token --with-decryption --query Parameter.Value --output text)
 export HF_TOKEN
 
+# 0. DLAMI's system python lacks ensurepip → `python3 -m venv` fails silently.
+#    Install python3-venv BEFORE creating the venv.
+apt-get update -y >/dev/null 2>&1 || true
+apt-get install -y python3-venv python3-pip >/dev/null 2>&1 || true
+
 # 1. ComfyUI on persistent EBS
 cd /opt
 git clone https://github.com/comfyanonymous/ComfyUI.git 2>/dev/null || (cd /opt/ComfyUI && git pull)
 cd /opt/ComfyUI
-python3 -m venv venv || true
+python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
 # PyTorch cu124 (L40S/Ada compatible; DLAMI may have it but reinstalling in venv is safe)
@@ -78,13 +83,12 @@ fetch_model() {{
         aws s3 cp "s3://$BUCKET/$S3_KEY" "$LOCAL_PATH"
     else
         echo "S3 miss: $S3_KEY — downloading from HF $HF_REPO/$HF_FILE"
-        pip install huggingface_hub 2>/dev/null || true
-        huggingface-cli download "$HF_REPO" "$HF_FILE" --local-dir "$(dirname $LOCAL_PATH)" --token "$HF_TOKEN"
-        # Rename if huggingface-cli placed file by its basename
-        HF_BASENAME=$(basename "$HF_FILE")
-        if [ "$HF_BASENAME" != "$(basename $LOCAL_PATH)" ] && [ -f "$(dirname $LOCAL_PATH)/$HF_BASENAME" ]; then
-            mv "$(dirname $LOCAL_PATH)/$HF_BASENAME" "$LOCAL_PATH"
-        fi
+        # NOTE: ComfyUI's requirements pull huggingface_hub >=1.x, where the old
+        # `huggingface-cli download` command is REMOVED (prints a deprecation
+        # notice and exits non-zero → would kill `set -e`). Use `hf download`.
+        hf download "$HF_REPO" "$HF_FILE" --local-dir /tmp/hfdl --token "$HF_TOKEN"
+        # hf download preserves the repo-relative path ($HF_FILE) under --local-dir
+        mv "/tmp/hfdl/$HF_FILE" "$LOCAL_PATH"
         echo "Caching to S3: s3://$BUCKET/$S3_KEY"
         aws s3 cp "$LOCAL_PATH" "s3://$BUCKET/$S3_KEY"
     fi
