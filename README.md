@@ -2,8 +2,15 @@
 
 在 AWS 上对 FLUX.2-dev 做 LoRA 微调并提供推理的端到端工程。训练 POC 已跑通,产出可用的游戏 slots 美术风格 LoRA;推理与生产化架构已规划。
 
-> **状态**:训练栈 ✅ 跑通 · 推理栈 🚧 规划/MVP 中 · 双栈协同 📋 已设计
+> **状态**:训练栈 ✅ 跑通 · 分层 LoRA ✅ Style+Character 双层训成 · 多层组合 Demo 🚧 生成中 · 推理栈 📋 已设计
 > **目标**:从手工 POC 演进为生产级双栈(训练 × 在线推理 × LoRA 产物协同)
+
+## 最新进展(2026-07-06)
+
+- **分层 LoRA 跑通**:同一批 18 张 slots 图,用两套 caption 策略训出解耦的 **Style LoRA**(`slotstyle`,详细 caption→学画风)+ **Character LoRA**(`slotchar`,稀疏 caption→学角色身份),各 390MB rank-32。
+- **单卡 46GB OOM 根因修复(关键)**:FLUX.2 训练在 `prepare_accelerator` 阶段稳定 OOM(差 ~200MB)。根因是 ai-toolkit 新 commit 只在采样步卸载文本编码器,导致 prepare 时 transformer+Mistral 同时在 GPU(44GB)。修复:patch 在 prepare 前把 TE 卸载到 CPU(`patch_flux2_te.py` PATCH 2),释放 ~24GB。训练显存降到 36GB,稳定跑通。**降分辨率/降 grad-accum 均无效**——纯权重占满型 OOM 只能靠卸载模型解决。详见 memory `reference-gpu-vram-optimization`。
+- **多卡不可行**:ai-toolkit FLUX.2 路径不支持模型并行(`split_model_over_gpus` 硬锁 FLUX.1),多卡只是数据并行,救不了单卡 OOM。
+- **Demo 生成矩阵**(`08_demo_matrix.py`):单层对照(base/style-only/char-only/combo)× 主题(海盗/龙/自定义美人鱼 IP)× 权重梯度,展示分层 LoRA 微调的特点与优势。
 
 ---
 
