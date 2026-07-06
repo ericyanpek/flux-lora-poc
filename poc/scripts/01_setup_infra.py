@@ -73,7 +73,10 @@ def create_ec2_iam_profile():
         "Statement": [
             {
                 "Effect": "Allow",
-                "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+                # Least-privilege: training/inference only read datasets/models and
+                # write outputs. No DeleteObject — the instance role never needs to
+                # delete S3 objects; drop it to avoid an unused destructive grant.
+                "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
                 "Resource": [f"arn:aws:s3:::{BUCKET}", f"arn:aws:s3:::{BUCKET}/*"],
             },
             {

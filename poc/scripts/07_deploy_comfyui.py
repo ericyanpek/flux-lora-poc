@@ -113,12 +113,29 @@ fetch_model \
     "Comfy-Org/flux2-dev" \
     "split_files/vae/flux2-vae.safetensors"
 
-# LoRAs from training outputs (S3 only — no HF fallback)
-echo "Fetching LoRA weights from S3..."
-aws s3 cp "s3://$BUCKET/outputs/lora-style-20260706-112005/flux-lora-poc.safetensors" \
-    "models/loras/slotstyle.safetensors" || echo "WARN: slotstyle LoRA not found, skipping"
-aws s3 cp "s3://$BUCKET/outputs/lora-char-20260706-134937/flux-lora-poc.safetensors" \
-    "models/loras/slotchar.safetensors" || echo "WARN: slotchar LoRA not found, skipping"
+# LoRAs from training outputs (S3 only — no HF fallback).
+# Resolve the LATEST run per layer instead of a hardcoded timestamp, so a new
+# training run is picked up with no code change. ai-toolkit writes each run to
+# outputs/lora-<layer>-<timestamp>/flux-lora-poc.safetensors; the prefixes sort
+# lexicographically by timestamp, so `sort | tail -1` = newest.
+# (MVP for the manifest+SSM-pointer contract in docs/architecture/dual-stack-plan.md.)
+echo "Resolving latest LoRA runs from S3..."
+fetch_latest_lora() {{
+    local LAYER="$1"       # style | char
+    local DEST="$2"
+    local PREFIX
+    PREFIX=$(aws s3 ls "s3://$BUCKET/outputs/" | awk '{{print $2}}' \
+        | grep "^lora-$LAYER-" | sort | tail -1)
+    if [ -z "$PREFIX" ]; then
+        echo "WARN: no lora-$LAYER-* run found in s3://$BUCKET/outputs/, skipping"
+        return
+    fi
+    echo "Latest $LAYER LoRA: $PREFIX"
+    aws s3 cp "s3://$BUCKET/outputs/${{PREFIX}}flux-lora-poc.safetensors" "$DEST" \
+        || echo "WARN: $LAYER LoRA object missing in $PREFIX, skipping"
+}}
+fetch_latest_lora "style" "models/loras/slotstyle.safetensors"
+fetch_latest_lora "char"  "models/loras/slotchar.safetensors"
 
 # 4. Start ComfyUI (SSM port forwarding; --lowvram offloads layers to save VRAM)
 nohup venv/bin/python main.py --listen 127.0.0.1 --port 8188 --lowvram > /var/log/comfyui.log 2>&1 &

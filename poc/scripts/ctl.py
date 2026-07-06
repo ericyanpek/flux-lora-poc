@@ -9,7 +9,7 @@ flux ctl — 一条命令管理 FLUX.2 训练/推理实例的生命周期。
   python3 ctl.py start                  # 启动实例(等到 SSM 就绪)
   python3 ctl.py stop                   # 停止实例(省钱;EBS+模型缓存保留)
   python3 ctl.py train [--steps N]      # 在实例上跑训练(用 SLOTIP 数据集)
-  python3 ctl.py infer "<prompt>"       # 用 final LoRA 生成一张图
+  python3 ctl.py infer ["<prompt>"]     # 推理不在训练机做 → 指引到 ComfyUI 推理机
   python3 ctl.py logs [train|infer]     # 看最近日志
   python3 ctl.py run "<shell command>"  # 在实例上执行任意命令
 
@@ -156,12 +156,17 @@ def cmd_train(args):
 
 
 def cmd_infer(args):
-    _ensure_running()
-    prompt = args.prompt
-    print(f"Generating: {prompt!r}")
-    print("  (note: L40S 46GB inference is tight; if OOM, this needs g7e or async)")
-    # 复用之前的推理 config 思路,但提示用户当前显存限制
-    print("  推理在 46GB 单卡上易 OOM,建议规模化后用 g7e。此命令为占位,详见 dual-stack-plan.md")
+    # 推理不在训练机上做。实测:ai-toolkit 的 loader 在 46GB 单卡上跑 FLUX.2 推理
+    # 会 segfault/OOM(见 poc/scripts/inference/ 下几个失败尝试)。可靠路径是独立的
+    # ComfyUI 推理机(官方 fp8 预量化底模 + 分层 LoRA),已验证跑通。
+    print("训练机不做推理。请用独立 ComfyUI 推理机(已验证可用):")
+    print("  1) 部署:  python3 poc/scripts/07_deploy_comfyui.py")
+    print("  2) SSM 端口转发 8188(部署脚本会打印命令)")
+    print("  3) 出图:  在推理机上跑 poc/scripts/inference/comfy_gen.py")
+    print("            --config base|style|char|combo --out /exp/<cfg>")
+    print("背景与设计:docs/superpowers/specs/2026-06-28-comfyui-inference-design.md")
+    if args.prompt:
+        print(f"\n(你给的 prompt {args.prompt!r} 请填进 comfy_gen.py 的 THEMES 或作为自定义主题)")
 
 
 def cmd_logs(args):
@@ -191,7 +196,7 @@ if __name__ == "__main__":
     sub.add_parser("stop")
     pt = sub.add_parser("train"); pt.add_argument("--steps", type=int, default=None)
     pt.add_argument("--layer", choices=["style", "char"], default=None)
-    pi = sub.add_parser("infer"); pi.add_argument("prompt")
+    pi = sub.add_parser("infer"); pi.add_argument("prompt", nargs="?", default=None)
     pl = sub.add_parser("logs"); pl.add_argument("kind", nargs="?", choices=["train", "infer"])
     pr = sub.add_parser("run"); pr.add_argument("command")
     args = p.parse_args()

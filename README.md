@@ -1,19 +1,24 @@
 # FLUX.2-dev LoRA 训练 / 推理平台
 
-在 AWS 上对 FLUX.2-dev 做 LoRA 微调并提供推理的端到端工程。训练 POC 已跑通,产出可用的游戏 slots 美术风格 LoRA;推理与生产化架构已规划。
+在 AWS 上对 FLUX.2-dev 做 LoRA 微调并提供推理的端到端工程。训练 POC 已跑通,产出可用的游戏 slots 美术风格 LoRA;推理已用 ComfyUI 独立推理机跑通并出对照 Demo。
 
-> **状态**:训练栈 ✅ 跑通 · 分层 LoRA ✅ Style+Character 双层 · 多层组合 Demo ✅ · 推理栈 📋 已设计
+> **状态**:训练栈 ✅ · 分层 LoRA ✅ Style+Char 双层(有产物) · 多层组合 Demo ✅(有对照矩阵) · 推理栈 ✅ ComfyUI 独立机跑通 · 原生多参考图 🟡 设计+骨架待验证
 > **目标**:从手工 POC 演进为生产级双栈(训练 × 在线推理 × LoRA 产物协同)
+>
+> **每个 ✅ 都指向可见产物**:分层/组合 → `docs/experiments/layered-lora-results.md` + S3 `demo/comfyui-matrix/`;推理 → `poc/scripts/inference/comfy_gen.py`。🟡 = 代码就绪未 GPU 验证,不声称跑通。
 
 ---
 
 ## 已验证的结论(POC 实况)
 
-- **模型**:FLUX.2-dev = 32B rectified-flow transformer + **Mistral-Small-3.1-24B** 文本编码器(两个独立模型,共 ~90GB 下载)
+- **模型**:FLUX.2-dev = 32B rectified-flow transformer + **Mistral-Small-3.x-24B** 文本编码器[^mistral](两个独立模型,共 ~90GB 下载)
 - **硬件**:EC2 **g6e.4xlarge**(L40S **46GB** + 128GB RAM,us-west-2)。标称 48GB,PyTorch 进程实际可用仅 **~44.4GB**,对 FLUX.2 训练极度吃紧——显存管理是本项目最大工程难点
 - **单 LoRA**:390MB rank-32 safetensors(触发词 `SLOTIP`),slots 美术风格迁移**成功**;1500 步训完,实测 **1000 步即收敛**,之后饱和
-- **分层 LoRA**:同一批 18 张图,用两套 caption 策略训出解耦的 **Style LoRA**(`slotstyle`,详细 caption → 学画风)+ **Character LoRA**(`slotchar`,稀疏 caption → 学角色身份)。核心原理:*没写进 caption 的共同特征会被焊进 LoRA*。两层 rank 统一 32(便于后续加权组合/合并)
-- **多层组合**:推理时 `set_adapters([style,char], weights)` 加权叠加,生成既保画风又保角色的新资产;`08_demo_matrix.py` 提供单层对照(base / style-only / char-only / combo)× 多主题 × 权重梯度的对比矩阵
+- **分层 LoRA ✅(有产物)**:同一批 18 张图,用两套 caption 策略训出 **Style LoRA**(`slotstyle`,详细 caption → 学画风)+ **Character LoRA**(`slotchar`,稀疏 caption → 学角色身份)。核心原理:*没写进 caption 的共同特征会被焊进 LoRA*。两层 rank 统一 32。产物见 `docs/experiments/layered-lora-results.md`。**诚实说明**:两层因用同一批图训练,未能完全解耦(char 层也带 slots 画风)——完全解耦需跨风格的同角色数据集
+- **多层组合 ✅(有对照矩阵)**:推理时用 ComfyUI 串接 `LoraLoader` 加权叠加(style 0.9 + char 0.8),生成既保画风又保角色的新资产。`comfy_gen.py` 产出单层对照矩阵:base / style-only / char-only / combo × 3 主题(海盗/龙/自定义美人鱼 IP),12 张图在 S3 `demo/comfyui-matrix/`。**风格能泛化到训练集外的新角色**(龙/海盗)
+- **推理 ✅(ComfyUI 独立机)**:ai-toolkit loader 在 46GB 上做 FLUX.2 推理会 segfault/OOM;可靠路径是独立 ComfyUI 推理机(官方 fp8 预量化底模,`--lowvram` 分时 offload)。**关键验证**:ai-toolkit 训练的 bf16 LoRA 在 ComfyUI fp8 底模上直接兼容——零 `lora key not loaded`、零 Float8 报错(此前预判的最大坑没发生)
+
+[^mistral]: 上游版本号命名不一致:HF diffusers 博客写 3.1,BFL 官方 flux2 inference repo 的编码器/upsampler 实为 `Mistral-Small-3.2-24B-Instruct-2506`;diffusers 里类名 `Mistral3ForConditionalGeneration` 不带小版本号。ComfyUI 拉的 `mistral_3_small_flux2_fp8` 文件名与小版本无关。故本文统一写 3.x。
 
 ---
 
@@ -84,16 +89,29 @@ python3 poc/scripts/ctl.py stop           # 停机省钱(EBS+模型缓存保留)
 
 **显存管理(本项目核心难点)**:FLUX.2 训练在 `prepare_accelerator` 阶段峰值最高——transformer + Mistral 若同时在 GPU 达 44GB,超 46GB 天花板。两个 patch(见 `patch_flux2_te.py`)解决:①Mistral CPU 量化后再上 GPU;②prepare 前把 Mistral 卸载到 CPU(训练不需要它常驻,已缓存 embedding)。卸载后训练显存稳定在 ~36GB。docker 关键参数:`--shm-size=24g`、`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`、HF 缓存挂 EBS。
 
-**分层训练**:`06_prepare_layers.py` 从同一批图生成 style/char 两套 caption;`ctl.py train --layer style|char` 分别训练;`08_demo_matrix.py` 做多层组合对比出图。
+**分层训练**:`06_prepare_layers.py` 从同一批图生成 style/char 两套 caption;`ctl.py train --layer style|char` 分别训练。
 
 ---
 
-## 推理(规划中)
+## 推理(ComfyUI 独立机 ✅ 已跑通)
 
-L40S 46GB 单卡推理在 VAE 解码 + Mistral 编码叠加时逼近 46GB,**只够异步/POC**。两条路:
+L40S 46GB 单卡上,**ai-toolkit loader 做 FLUX.2 推理会 segfault/OOM**(见 `poc/scripts/inference/` 下几个失败尝试)。可靠路径是独立 ComfyUI 推理机:
 
-1. **ComfyUI 独立推理机**(最快验证,详见 `docs/superpowers/specs/2026-06-28-comfyui-inference-design.md`)——用 ComfyUI 官方预量化 fp8 文件,加载一次常驻,出图秒级,避开训练入口每次 ~13 分钟的运行时量化
-2. **生产在线 API**(详见双栈规划)——建议上 **g7e RTX PRO 6000 96GB**,让 TE+transformer+VAE 全常驻;Blackwell 缺货期用 L40S + SageMaker Async 队列过渡
+```bash
+# 1) 部署独立 g6e.4xlarge 推理机(与训练机隔离;自动拉最新 style/char LoRA)
+python3 poc/scripts/07_deploy_comfyui.py
+# 2) 部署脚本会打印 SSM 端口转发命令(8188)
+# 3) 在推理机上出图(base/style/char/combo × 主题):
+python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo
+```
+
+- 用 ComfyUI 官方预量化 **fp8** 文件(transformer 34G + Mistral TE 17G + VAE),`--lowvram` 分时 offload,GPU 峰值 <42GB,25 步单图 ~35s(模型常驻后)。
+- **LoRA 兼容性已验证**:ai-toolkit bf16 rank-32 LoRA 在 fp8 底模上直接加载生效,无 key mismatch / Float8 报错。
+- 详见 `docs/superpowers/specs/2026-06-28-comfyui-inference-design.md`。
+
+**第二条互补主线(🟡 设计+骨架)**:FLUX.2 **底模自带**多参考图能力(最多 10 张,无需训练),用于角色一致性(同角色跨场景)。脚本骨架 `poc/scripts/inference/09_multiref_infer.py`,设计见 `docs/superpowers/specs/2026-06-30-multiref-inference-design.md`。**未 GPU 验证,不标 ✅。**
+
+**生产在线 API**(详见双栈规划):建议上 **g7e RTX PRO 6000 96GB** 让 TE+transformer+VAE 全常驻;Blackwell 缺货期用 L40S + SageMaker Async 队列过渡。
 
 ---
 
@@ -118,23 +136,30 @@ poc/
 ├── .env.example              配置模板(账号/region/subnet/AMI/实例ID)
 ├── buildspec.yml             CodeBuild 构建脚本(含 Docker Hub 认证)
 ├── docker/
-│   ├── Dockerfile            训练镜像(DLAMI base + ai-toolkit main + optimum-quanto 0.2.7)
+│   ├── Dockerfile            训练镜像(ai-toolkit pin 4e50535 + optimum-quanto 0.2.7)
 │   ├── train_entry.py        ai-toolkit 配置生成 + 训练入口(arch:flux2)
 │   └── patch_flux2_te.py     两个 patch:①Mistral CPU 量化后上 GPU ②prepare 前卸载 TE(避 OOM)
 └── scripts/
     ├── config.py             共享配置(从 .env 读)
-    ├── ctl.py                ⭐ 生命周期 CLI(start/stop/status/train --layer/logs/run)
+    ├── ctl.py                ⭐ 生命周期 CLI(start/stop/status/train --layer/logs;infer→指引 ComfyUI)
     ├── 00_cleanup_sagemaker.py
-    ├── 01_setup_infra.py     S3 + ECR + IAM + CodeBuild
+    ├── 01_setup_infra.py     S3 + ECR + IAM + CodeBuild(最小权限 IAM)
     ├── 02_trigger_build.py   触发 CodeBuild
     ├── 03_upload_dataset.py  上传单一数据集
     ├── 06_prepare_layers.py  ⭐ 分层:同批图生成 style/char 两套 caption
     ├── 07_compose_experiment.py  多层 LoRA 组合网格实验
-    ├── 08_demo_matrix.py     ⭐ Demo 生成矩阵(单层对照 × 主题 × 权重梯度)
+    ├── 07_deploy_comfyui.py  ⭐ 部署独立 ComfyUI 推理机(自动拉最新 LoRA)
+    ├── 08_demo_matrix.py     Demo 矩阵(diffusers 版,早期;现用 comfy_gen.py)
     ├── 04_submit_training.py 起新实例跑训练(早期方式)
-    └── 05_monitor.py
+    ├── 05_monitor.py
+    └── inference/
+        ├── comfy_gen.py      ⭐ ComfyUI API 出图(FLUX.2 fp8 + 分层 LoRA;已跑通)
+        ├── comfy_probe.py    探测 ComfyUI 节点 schema
+        ├── 09_multiref_infer.py  🟡 原生多参考图骨架(未 GPU 验证)
+        └── (pirate_infer/single_lora_demo/gen_config_entry: 已验证失败的 ai-toolkit 46GB 推理尝试,保留作记录)
 docs/
 ├── architecture/dual-stack-plan.md          ⭐ 双栈端到端规划
+├── experiments/layered-lora-results.md      ⭐ 分层/组合实验报告(产物背书)
 └── superpowers/specs|plans/                  设计文档与实施计划
 ```
 

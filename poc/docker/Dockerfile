@@ -15,12 +15,21 @@ RUN pip3 install --no-cache-dir \
     "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" "torchaudio==2.6.0+cu124" \
     --index-url https://download.pytorch.org/whl/cu124
 
-# ai-toolkit main branch — has dedicated Flux2Model (arch: flux2) with proper
-# meta-device load + assign-weights handling for FLUX.2-dev. Do NOT pin to 75781fb
-# (predates flux2 support). Upgrade optimum-quanto to 0.2.7 (--no-deps to keep torch 2.6)
-# since requirements pins 0.2.4 which breaks fake-impl registration on torch 2.6.
+# ai-toolkit — has dedicated Flux2Model (arch: flux2) with proper meta-device load +
+# assign-weights handling for FLUX.2-dev. Do NOT pin to 75781fb (predates flux2 support).
+#
+# PINNED to 4e50535 (2026-06-28): this is the commit our two patches in
+# patch_flux2_te.py are anchored to (they match exact source strings). Leaving this on
+# floating main is a reproducibility time-bomb — one upstream refactor and the patch
+# anchors no longer match, so patch_flux2_te.py sys.exit(1)s and `docker build` fails.
+# ⚠️ To upgrade ai-toolkit: bump this SHA AND re-verify both patch blocks still apply
+# (the build will hard-fail with "PATCH N ERROR: ... upstream changed" if they don't).
+# Upgrade optimum-quanto to 0.2.7 (--no-deps to keep torch 2.6) since requirements pins
+# 0.2.4 which breaks fake-impl registration on torch 2.6.
+ARG AI_TOOLKIT_COMMIT=4e50535
 RUN git clone https://github.com/ostris/ai-toolkit /ai-toolkit && \
     cd /ai-toolkit && \
+    git checkout ${AI_TOOLKIT_COMMIT} && \
     pip3 install --no-cache-dir -r requirements.txt && \
     pip3 install --no-cache-dir --force-reinstall --no-deps "optimum-quanto==0.2.7"
 
