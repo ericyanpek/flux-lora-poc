@@ -1,8 +1,26 @@
 # FLUX.2 原生多参考图推理 —— 设计(第二条互补主线)
 
-> **状态**:📋 设计 + 🟡 脚本骨架(`poc/scripts/inference/09_multiref_infer.py`),**未 GPU 验证**。
+> **状态**:🟡 **部分验证**(2026-07-06 GPU 实跑)——身份保持 ✅,场景跟随 ⚠️。尚未达标,不标 ✅。
 > **定位**:与已跑通的分层 LoRA(见 `docs/experiments/layered-lora-results.md`)**并列的第二条能力主线**,不是替代。
-> **选型**:ComfyUI + FLUX.2-dev(与现有推理栈一致,已核实 `ReferenceLatent` 节点存在);diffusers Klein-KV 降为备选。
+> **选型**:ComfyUI + FLUX.2-dev(与现有推理栈一致,`ReferenceLatent` 节点已实跑生效);diffusers Klein-KV 降为备选。
+
+---
+
+## 0. 验证结果(2026-07-06 GPU 实跑)
+
+在推理机上以美人鱼参考图 + 多个新场景 prompt 实跑(脚本 `09_multiref_infer.py`,产物 S3 `demo/multiref2/`):
+
+- ✅ **角色身份保持极好**:参考图的脸型、发色、珍珠冠、青绿鱼尾、金三叉戟在多张输出中高度一致。`ReferenceLatent` 注入生效,身份锚定强。
+- ⚠️ **场景不跟随 prompt**:要求"沉船 / 夕阳水面 / 珊瑚花园"等新场景,输出仍近似复刻参考图构图,prompt 场景描述被压制。
+
+**原因分析(重要,避免误判)**:
+- **不是"缺场景 LoRA/模型不认识场景"**。底模 FLUX.2-dev 原生认识沙滩、沉船、夕阳等通用概念——证据:base 配置(无任何 LoRA)纯 prompt 出图时,场景词全部生效(见 `layered-lora-results.md` 的 base 列,海盗有船甲板、龙有洞穴)。
+- **真正原因是参考图注入权重过高**,`ReferenceLatent` 当前接法下参考图主导构图,盖过文字 prompt。即"参考图音量 100、文字音量 20",退化为近似 img2img 复制。这是身份保持 vs 场景自由度的平衡问题,非能力缺失。
+
+**下一步(调优方向,非训练)**:
+1. 配合 guidance / denoise 强度调节,降低参考图对构图的锁定。
+2. 改用 FluxKontext 部分注入(只借角色特征,不锁构图)。
+3. 参考图裁剪到仅角色主体 / 降分辨率再注入,减少背景干扰。
 
 ---
 

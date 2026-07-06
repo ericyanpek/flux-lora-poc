@@ -2,9 +2,11 @@
 
 面向游戏美术图片制作的 FLUX.2-dev LoRA 微调与推理工程,部署于 AWS。训练与推理均已在单卡 L40S(46GB)上端到端跑通,并产出可复现的对照 Demo。
 
-> **状态**:训练 ✅ · 分层 LoRA(Style + Character)✅ · 多层组合 ✅ · ComfyUI 独立推理 ✅ · 原生多参考图 🟡(设计+骨架,待 GPU 验证)
+> 👉 **业务/非技术读者**请看[项目介绍(白皮书)](docs/overview/项目介绍.md)——动机、做法、效果与价值一文讲清。
+
+> **状态**:训练 ✅ · 分层 LoRA(Style + Character)✅ · 多层组合 ✅ · ComfyUI 独立推理 ✅ · 原生多参考图 🟡(身份保持 ✅ / 场景跟随待调优)
 >
-> ✅ 均有产物背书:分层/组合见 [`docs/experiments/layered-lora-results.md`](docs/experiments/layered-lora-results.md);推理见 [`poc/scripts/inference/comfy_gen.py`](poc/scripts/inference/comfy_gen.py)。🟡 表示代码就绪但未经 GPU 验证。
+> ✅ 均有产物背书:分层/组合见 [`docs/experiments/layered-lora-results.md`](docs/experiments/layered-lora-results.md);推理见 [`poc/scripts/inference/comfy_gen.py`](poc/scripts/inference/comfy_gen.py)。🟡 表示已实跑但效果未完全达标。
 
 ---
 
@@ -107,7 +109,7 @@ python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo # 出
 - **LoRA 兼容性已验证**:ai-toolkit bf16 rank-32 LoRA 在 fp8 底模上直接加载生效,无 key mismatch / Float8 报错。
 - 设计见 [`docs/superpowers/specs/2026-06-28-comfyui-inference-design.md`](docs/superpowers/specs/2026-06-28-comfyui-inference-design.md)。
 
-**第二条互补主线(🟡)**:FLUX.2 底模原生支持多参考图(最多 10 张,无需训练),面向主体一致性(同一主体跨场景)。骨架 [`09_multiref_infer.py`](poc/scripts/inference/09_multiref_infer.py),设计见 [`2026-06-30-multiref-inference-design.md`](docs/superpowers/specs/2026-06-30-multiref-inference-design.md)。未经 GPU 验证。
+**第二条互补主线(🟡 部分验证)**:FLUX.2 底模原生支持多参考图(无需训练),面向主体一致性(同一主体跨场景)。已在 ComfyUI(`ReferenceLatent` 节点)实跑 [`09_multiref_infer.py`](poc/scripts/inference/09_multiref_infer.py):**角色身份保持极好,但场景跟随待调优**(参考图注入权重过高,压制了 prompt 场景控制;非能力缺失,详见[设计文档](docs/superpowers/specs/2026-06-30-multiref-inference-design.md)第 0 节)。
 
 **生产在线 API**:建议 g7e RTX PRO 6000 96GB 使编码器 + transformer + VAE 全常驻;缺货期以 L40S + SageMaker Async 队列过渡。详见双栈规划。
 
