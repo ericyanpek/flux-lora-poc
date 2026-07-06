@@ -12,7 +12,7 @@
 
 - **单 LoRA 风格迁移**:rank-32(390MB),1500 步训练,实测 1000 步收敛。目标美术风格迁移成功。
 - **分层 LoRA**:同一数据集经两套 caption 策略,训出解耦程度可控的 Style 层(详细 caption → 学画风)与 Character 层(稀疏 caption → 学主体)。原理:*未写入 caption 的共有特征被编码进 LoRA*。两层统一 rank,便于加权组合。
-- **多层组合**:推理侧串接 `LoraLoader` 加权叠加(Style 0.9 + Char 0.8),兼顾画风与主体。提供 base / style / char / combo × 多主题的对照矩阵,详见实验报告。
+- **多层组合**:推理侧串接 `LoraLoader` 加权叠加(Style 0.9 + Char 0.8),兼顾画风与主体。提供 base / style / char / combo × 多主题的对照矩阵,详见[实验报告](docs/experiments/layered-lora-results.md)。
 - **风格泛化**:训练集外的新主体同样继承目标美术风格,单一风格 LoRA 可复用于任意主体。
 - **推理**:独立 ComfyUI 实例加载官方预量化 fp8 底模,单图约 35s(模型常驻)。ai-toolkit 训练的 bf16 LoRA 与 fp8 底模直接兼容,无 key mismatch 或 Float8 报错。
 
