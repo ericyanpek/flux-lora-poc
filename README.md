@@ -28,6 +28,12 @@
 
 > 📖 完整动机、做法、效果与业务价值 → [项目介绍(白皮书)](docs/overview/项目介绍.md)(面向非技术读者)
 
+### 🎞️ 演示 PPT
+
+[![演示 PPT 封面](docs/overview/images/ppt_cover.png)](https://github.com/ericyanpek/flux-lora-poc/releases/download/demo-deck-v1/flux-lora-platform.pptx)
+
+**[⬇️ 下载演示 PPT](https://github.com/ericyanpek/flux-lora-poc/releases/download/demo-deck-v1/flux-lora-platform.pptx)** · [Release 页面](https://github.com/ericyanpek/flux-lora-poc/releases/tag/demo-deck-v1) — 面向业务/客户的一页式演示(动机 · 四步实践 · 对照效果 · 商业价值)
+
 ---
 
 ## ✨ 能力与结论
