@@ -17,7 +17,7 @@
 | Style | `slotstyle` | 详细 caption(把角色/物体都写进去)→ 模型学"没被描述的共性" = 画风 | `outputs/lora-style-20260706-112005/flux-lora-poc.safetensors` |
 | Character | `slotchar` | 稀疏 caption(只留主体名)→ 把更多视觉特征"焊进" LoRA | `outputs/lora-char-20260706-134937/flux-lora-poc.safetensors` |
 
-两层都从**同一批 18 张 slots 美术图**训练,只是 caption 策略不同(见 `poc/scripts/06_prepare_layers.py`)。均 rank-32,便于加权叠加。
+两层都从**同一批 18 张游戏美术图**训练,只是 caption 策略不同(见 `poc/scripts/06_prepare_layers.py`)。均 rank-32,便于加权叠加。
 
 ### 推理设置
 
@@ -48,9 +48,9 @@ base → style → char → combo(固定 seed=42,唯一变量是 LoRA 配置):
 | 配置 | 观察 |
 |------|------|
 | base | 通用可爱美人鱼立绘,画质好但只是"独立角色",无游戏氛围 |
-| style | 同一美人鱼被渲染成 **slots 游戏美术**:出现老虎机转轮网格、数字符号(9/10)、UI 排布。**风格迁移明确生效** |
-| char | 也带 slots 美学 + 更强的转轮/图标框架(见下"解耦"讨论) |
-| combo | 兼具画风与角色:美人鱼 + 完整 slots 面板 + 金币/珍珠氛围,可直接当素材 |
+| style | 同一美人鱼被渲染成**目标游戏美术风格**:出现游戏面板网格、数字符号、UI 排布。**风格迁移明确生效** |
+| char | 也带目标游戏美学 + 更强的面板/图标框架(见下"解耦"讨论) |
+| combo | 兼具画风与角色:美人鱼 + 完整游戏面板 + 金币/珍珠氛围,可直接作为素材 |
 
 ### dragon / pirate(通用新角色,验证泛化)
 
@@ -71,8 +71,8 @@ base → style → char → combo(固定 seed=42,唯一变量是 LoRA 配置):
 3. 多层 combo 叠加可用,无加载报错(fp8 底模 + bf16 LoRA 兼容性 OK,见 `reference_comfyui_inference` memory)。
 
 **⚠️ 未完全达标 / 需注意:**
-1. **两层未完全解耦**。因为 style 和 char 用**同一批 18 张 slots 图**训练,`char`-only 也带明显的 slots 画风,不是"纯角色身份、无画风"。要真正解耦需让 char 层用**跨风格的同角色图**训练——当前数据集不具备。目前 style/char 的差异更多是"caption 密度导致的特征保留程度"差异,而非"画风 vs 身份"的干净切分。
-2. **触发词渗进画面文字**。`slotstyle`/`slotchar` 有时被渲染成画面里的文字(如 `SLOTCHAR`、乱码 `BUISTYLE`)。因 slots 美术本身充满文字/数字,模型把触发词当成了可渲染文本。生产中应换成不易被当文字的触发词,或在 caption 里更明确隔离。
+1. **两层未完全解耦**。因为 style 和 char 用**同一批 18 张图**训练,`char`-only 也带明显的目标画风,不是"纯角色身份、无画风"。要真正解耦需让 char 层用**跨风格的同角色图**训练——当前数据集不具备。目前 style/char 的差异更多是"caption 密度导致的特征保留程度"差异,而非"画风 vs 身份"的干净切分。
+2. **触发词渗进画面文字**。触发词有时被渲染成画面里的文字(如乱码字样)。因目标美术本身含大量文字/数字元素,模型把触发词当成了可渲染文本。生产中应换成不易被当文字的触发词,或在 caption 中更明确隔离。
 3. **未做定量评分**。本轮是视觉对照,没跑 CLIP-score / 人工 rubric 网格。`07_compose_experiment.py` 的 3×3 权重网格定量评估仍是 TODO。
 
 ---
