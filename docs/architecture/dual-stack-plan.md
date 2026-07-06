@@ -70,6 +70,51 @@
 - **两个硬限制**:① hotswap 不支持 text-encoder LoRA;② 后续 LoRA 的 target 层须是首个的子集,先加载 target 最多的。当前游戏美术 LoRA 训练含 CLIP/TE 侧(`strength_clip>0`),生产化前需确认改为 transformer-only,否则 hotswap 路径不成立(待验证项)
 - 出处:[diffusers PEFT 推理](https://huggingface.co/docs/diffusers/main/en/tutorials/using_peft_for_inference)
 
+---
+
+## 四之补 · 训练↔推理衔接的生态位:Registry + Adapter-Serving
+
+> 这一层专门解决"训练产出的 LoRA 如何被推理发现、加载、切换"。它是本项目商业形态(**一个 FLUX.2 底模 + 不断增长的风格/角色 LoRA 库**)的核心杠杆——LoRA 数量涨起来后,衔接层的选型决定了单卡能同时服务多少客户/风格。
+
+衔接要解决四个子问题,每个都有对应的成熟生态位:
+
+| 子问题 | 说明 | 生态位 |
+|--------|------|--------|
+| 存储与真相源 | 产物放哪、谁是权威版本 | S3 / 对象存储 |
+| 版本化与血缘 | 哪个 LoRA 由哪次训练+哪批数据+什么超参产出,可追溯可回滚 | **Registry**(A 类) |
+| 发现与契约 | 推理运行时如何知道"有新版本、加载哪个" | manifest + 指针 / 事件 |
+| 加载与切换 | 运行时热加载/切换 adapter,不重启不重编译 | **Adapter-Serving**(B 类) |
+
+### A 类 · 产物注册与版本化(Registry)
+
+| 产品 | 定位 | 何时选 |
+|------|------|--------|
+| **W&B Artifacts** | 产物注册 + 血缘 + alias(`production`),S3 做后端 | 已用 W&B 监控 → 本项目首选,零额外基础设施 |
+| **MLflow Model Registry** | 开源标准,阶段流转(Staging→Production) | 要开源自建、可控 |
+| **SageMaker Model Registry** | AWS 原生,与 Pipelines/Endpoint 打通 | 已深度用 SageMaker |
+| **Hugging Face Hub** | 模型/LoRA 托管 + 版本 + 私有仓库 | 用社区生态、半公开分发 |
+| **DVC / ClearML** | Git 式数据/模型版本 | 强调实验可复现 |
+
+### B 类 · LoRA/Adapter 动态服务(最贴本项目场景)
+
+近年为"单底模 + 动态挂载大量 LoRA"催生的生态,正是"一套底模、每客户/项目一组风格插件"的天然解:
+
+| 产品 | 关键能力 | 适用性 |
+|------|---------|--------|
+| **[LoRAX](https://github.com/predibase/lorax)**(Predibase 开源) | 单底模动态加载**成百上千个 LoRA**,请求级指定 adapter,显存共享,多租户 | 多租户 LoRA serving 的标杆;主打 LLM,扩散需适配 |
+| **diffusers hotswap** | compile 后切 LoRA 不重编译(见上) | 扩散原生,本项目规划路径 |
+| **HF PEFT** | adapter 加载底层库,`set_adapters([...], weights)` 多 LoRA 加权 | 已在用(ComfyUI 底层同理) |
+| **vLLM multi-LoRA** | LoRA 热插拔 | 仅 LLM,**扩散不适用** |
+| **Replicate / Modal / Fal** | 托管推理平台,上传 LoRA 按需加载,serverless 计费 | 想免运维、按量付费 |
+
+### 演进建议(按 LoRA 库规模)
+
+1. **POC(当前)**:S3 + latest-SUCCESS-by-timestamp 扫描,部署时加载 —— 已实现,够用。
+2. **产品化第一步**:W&B Artifacts 做版本/血缘 + `production` alias(复用现有栈,成本最低)—— 即本节 A 类 + 上文三件套。
+3. **规模化(LoRA 数量→几十上百 / 多租户按需切换)**:上 **B 类 adapter-serving**(LoRAX 式单底模挂载海量 adapter),而非自己拼 hotswap。这是单卡服务密度的关键杠杆。
+
+**为什么这一层是商业杠杆**:通用 AI 画图按次付费、无资产沉淀;而"底模 + LoRA 库 + adapter-serving"让每新增一个客户风格只是**加一个 390MB 插件**,不是加一台机器——单位边际成本随规模摊薄,这正是自建微调栈相对通用 API 的结构性优势。
+
 ### 显存与冷启动
 - fp8 量化(甜点位,FLUX 整体 ~18-20GB,~95% 质量)
 - Mistral TE 编码完卸载 / remote TE(本地只剩 ~18GB)

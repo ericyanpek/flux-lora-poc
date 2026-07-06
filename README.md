@@ -140,9 +140,11 @@ python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo # 出
 📐 [`docs/architecture/dual-stack-plan.md`](docs/architecture/dual-stack-plan.md)(**生产化目标设计,部分尚未实现**)
 
 - **文本编码器解耦**:将 Mistral-24B 拆为独立可调度单元,同解训练显存、推理显存与推理扩缩容。
-- **产物协同**(规划):W&B Artifacts + S3 manifest + SSM 指针 + diffusers hotswap。*当前实际契约是 `07_deploy_comfyui.py` 的 latest-SUCCESS-by-timestamp S3 扫描,manifest/SSM 尚未实现。*
+- **训练↔推理衔接**:LoRA 产物的存储/版本化/发现/热加载,分两类生态位——**Registry**(W&B Artifacts / MLflow / SageMaker Registry,做版本+血缘)与 **Adapter-Serving**(LoRAX / diffusers hotswap / PEFT,单底模动态挂载大量 LoRA)。*当前 POC 用 `07_deploy_comfyui.py` 的 latest-SUCCESS-by-timestamp S3 扫描;规模化选型见下。* 👉 [详见双栈规划 §四之补](docs/architecture/dual-stack-plan.md)
 - **推理框架**:FastAPI + diffusers(MVP)→ Ray Serve / Triton(规模化);vLLM 不适用扩散模型。
 - **扩缩容**:SageMaker Async(MVP)→ EKS + Karpenter + KEDA(规模化);HPA 不适用 GPU。
+
+> 💡 **为什么衔接层是商业杠杆**:"底模 + LoRA 库 + adapter-serving" 让每新增一个客户风格只是加一个 390MB 插件、而非加一台机器,单位边际成本随规模摊薄——这是自建微调栈相对通用 API 的结构性优势。
 
 ---
 
