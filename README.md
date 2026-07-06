@@ -2,11 +2,31 @@
 
 面向游戏美术图片制作的 FLUX.2-dev LoRA 微调与推理工程,部署于 AWS。训练与推理均已在单卡 L40S(46GB)上端到端跑通,并产出可复现的对照 Demo。
 
-> 👉 **业务/非技术读者**请看[项目介绍(白皮书)](docs/overview/项目介绍.md)——动机、做法、效果与价值一文讲清。
-
 > **状态**:训练 ✅ · 分层 LoRA(Style + Character)✅ · 多层组合 ✅ · ComfyUI 独立推理 ✅ · 原生多参考图 🟡(身份保持 ✅ / 场景跟随待调优)
 >
 > ✅ 均有产物背书:分层/组合见 [`docs/experiments/layered-lora-results.md`](docs/experiments/layered-lora-results.md);推理见 [`poc/scripts/inference/comfy_gen.py`](poc/scripts/inference/comfy_gen.py)。🟡 表示已实跑但效果未完全达标。
+
+---
+
+## 💡 为什么要微调专属模型
+
+通用 AI 绘图(Midjourney、通用大模型)能画出好图,但对有品牌的团队有三个硬伤:**风格漂移**(画风不稳,缺品牌一致性)、**角色不稳**(同一 IP 换场景就变脸)、**产能与成本**(大量返工才能达上线标准)。
+
+微调把 AI 从"通用画手"变成**懂你风格的专属美术**:用少量自有素材训练,即可稳定复现品牌调性、把风格套用到任意新角色,且产出的模型是**你自己的数字资产**(可私有部署、边际成本低)。
+
+| 维度 | 通用 AI 工具 | 微调专属模型(本方案) |
+|------|-------------|----------------------|
+| 风格一致性 | 每次漂移 | **稳定复现品牌调性** |
+| 新角色适配 | 逐个碰运气 | **一次训练,套用任意新角色** |
+| 资产归属 | 依赖第三方 | **模型/插件归你所有,可私有部署** |
+
+**眼见为实**——同一角色、相同文字提示,唯一变量是加载的插件:
+
+| 无插件 | +风格插件 | +角色插件 | 叠加 |
+|:---:|:---:|:---:|:---:|
+| ![](docs/experiments/images/mermaid_base.png) | ![](docs/experiments/images/mermaid_style.png) | ![](docs/experiments/images/mermaid_char.png) | ![](docs/experiments/images/mermaid_combo.png) |
+
+> 📖 完整动机、做法、效果与业务价值 → [项目介绍(白皮书)](docs/overview/项目介绍.md)(面向非技术读者)
 
 ---
 
