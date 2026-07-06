@@ -2,7 +2,7 @@
 
 > **状态**:📋 设计 + 🟡 脚本骨架(`poc/scripts/inference/09_multiref_infer.py`),**未 GPU 验证**。
 > **定位**:与已跑通的分层 LoRA(见 `docs/experiments/layered-lora-results.md`)**并列的第二条能力主线**,不是替代。
-> **来源**:外部走查(2026-07-06 HANDOFF)T6;API 已按 diffusers `main` 文档核实(2026-07-06)。
+> **选型**:ComfyUI + FLUX.2-dev(与现有推理栈一致,已核实 `ReferenceLatent` 节点存在);diffusers Klein-KV 降为备选。
 
 ---
 
@@ -16,53 +16,52 @@ FLUX.2 **底模自带**多参考图能力(官方模型卡:"No need for finetunin
 
 ---
 
-## 2. API 事实(已按 diffusers main 文档核实,2026-07-06)
+## 2. 选型:ComfyUI + FLUX.2-dev(与现有推理栈一致)
 
-diffusers 的 FLUX.2 有 4 个 pipeline(`src/diffusers/pipelines/flux2/`):
+**首选方案 = ComfyUI + FLUX.2-dev,复用现有推理机,不引入新框架/新模型。**
 
-| Pipeline | 文本编码器 | 参考图支持 | 说明 |
-|----------|-----------|-----------|------|
-| `Flux2Pipeline` | Mistral3 (dev) | `image=` 接受 `list[PIL.Image]` | dev 主 pipeline;`image` 文档描述偏 img2img "starting point",**多参考图语义需实测确认** |
-| `Flux2KleinPipeline` | Qwen3 (klein) | `image=` | Klein 9B 变体 |
-| `Flux2KleinKVPipeline` | Qwen3 (klein) | **`image=` 明确为 reference conditioning** | KV-cache 缓存参考图 token;**文档明确写"reference image conditioning",是多参考图的正主**;默认 4 步,快 |
-| `Flux2KleinInpaintPipeline` | Qwen3 | — | inpaint |
+依据:
+- FLUX.2-**dev** 底模**原生支持**多参考图,是 BFL 官方一级特性。模型卡原文:"No need for finetuning: character, object and style reference without additional training in one model",并列出 "multi-reference editing"。**不是"只有 Klein 能做参考图"**。
+- 本项目已确立的核心结论:diffusers / ai-toolkit 在 46GB 上做 FLUX.2 推理会 segfault/OOM,**ComfyUI(fp8 底模)才是可靠路径**。多参考图应沿用同一栈。
+- 已在推理机(g6e.4xlarge)的 ComfyUI 上核实存在 **`ReferenceLatent`** 节点(FLUX.2 / Kontext 系列做参考图 conditioning 的标准节点),配 `EmptyFlux2LatentImage` / `Flux2Scheduler` 等。**无需 diffusers、无需额外权重**——底模、VAE、TE 都已加载。
+- 额外收益:参考图定角色 + 现有 Style LoRA 定画风,可在同一 workflow 里叠加(探索项)。
 
-**关键结论**:
-- 参考图入参统一是 **`image=`**(单张 `PIL.Image` 或 `list[PIL.Image]`),不是 `reference_images=`。走查里的猜测方向对。
-- **角色一致性的最佳 pipeline 是 `Flux2KleinKVPipeline`**(文档唯一明确标注"reference image conditioning + K/V cache"的),官方示例:
-  ```py
-  from diffusers import Flux2KleinKVPipeline
-  from PIL import Image
-  pipe = Flux2KleinKVPipeline.from_pretrained("black-forest-labs/FLUX.2-klein-9b-kv", torch_dtype=torch.bfloat16)
-  pipe.to("cuda")
-  ref = Image.open("reference.png")
-  img = pipe("A cat dressed like a wizard", image=ref, num_inference_steps=4).images[0]
-  ```
-- ⚠️ **dev 版(`Flux2Pipeline`)用 `image=[多张]` 做多参考图的确切行为,骨架里标 🟡,GPU 上跑通前不声称。** Klein-KV 是文档背书最强的路径,但需要另一套 Klein 权重(Qwen3 编码器,非 Mistral)。
+**workflow 结构(ComfyUI)**:
+```
+LoadImage(参考图) → (可选 FluxKontextImageScale) → VAEEncode → ReferenceLatent ┐
+CLIPTextEncode(prompt) ─────────────────────────────────────────────────────┼→ (conditioning)
+UNETLoader(flux2 fp8) + CLIPLoader(flux2) + VAELoader ────────────────────────┘
+        → KSampler → VAEDecode → SaveImage
+```
+`ReferenceLatent` 把参考图的 latent 注入 conditioning;多张参考图可串接多个 `ReferenceLatent`(对应官方"多参考")。
+
+### 备选:diffusers Klein-KV(仅当需要极速交互)
+
+`Flux2KleinKVPipeline`(diffusers)是文档明确标注 "reference image conditioning + K/V cache" 的 pipeline,默认 4 步、显存低,**适合现场高频交互**。但它需要另一套 gated 权重 `FLUX.2-klein-9b-kv`(Qwen3 编码器,非 Mistral),且回到了 diffusers 栈。**仅在"4 步极速交互"成为硬需求时才考虑**,不作为首选。参考图入参为 `image=`(单张 PIL 或 list)。
 
 ---
 
 ## 3. 显存与机器
 
-- dev `Flux2Pipeline` 全量 bf16 在 46GB 上此前实测 segfault/OOM(见 `poc/scripts/inference/` 失败尝试);要跑需 fp8/量化或更大卡。
-- **Klein 9B 显存需求断崖下降**,46GB 甚至更小卡可跑,且 KV pipeline 默认 4 步、快——**Demo 现场交互的最优解可能是 Klein-KV**。
-- 复用现有 ComfyUI 推理机(g6e.4xlarge)或新起 Klein 专用机。ComfyUI 侧也有对应的参考图节点(后续可对齐)。
+- 复用现有 ComfyUI 推理机(g6e.4xlarge),fp8 底模已加载,`--lowvram` 分时 offload,与文生图路径同栈同显存表现(GPU 峰值 <42GB)。
+- 不新增实例、不下载新权重——这是选 ComfyUI+dev 相对 Klein-KV 的最大成本优势。
 
 ---
 
-## 4. 脚本骨架职责(`09_multiref_infer.py`)
+## 4. 脚本职责(`09_multiref_infer.py`)
 
-1. 载入 1~N 张角色定妆参考图(本地或 S3)。
-2. 用 `image=[refs]` + prompt 生成"同角色 × 新场景/新姿态"。
-3. 固定 seed 输出一组对照:参考图 → 多个新场景。
+沿用 `comfy_gen.py` 的 ComfyUI API 驱动方式(POST `/prompt` + 轮询 `/history`):
+1. 载入 1~N 张角色定妆参考图。
+2. 构造含 `ReferenceLatent` 的 FLUX.2 workflow,+ prompt 生成"同角色 × 新场景/新姿态"。
+3. 固定 seed 输出对照:参考图 → 多个新场景。
 4. 产物存 S3 `demo/multiref/`,供 README 引用。
 
-**验收(达标才可标 ✅)**:一组"同一角色 × 多场景"样图,现场可改 prompt 重出且角色身份稳定。达标前 README 标 🟡。
+**验收(达标才可标 ✅)**:一组"同一角色 × 多场景"样图,角色身份跨场景保持。达标前 README 标 🟡。
 
 ---
 
 ## 5. 未决 / 待实测
 
-- dev `Flux2Pipeline` `image=[多张]` 是否真做多参考融合(vs 仅取第一张当 img2img 起点)——**必须 GPU 实测**。
-- Klein-KV 需要 `FLUX.2-klein-9b-kv` 权重(gated,Qwen3 编码器)——下载 + 显存待测。
-- 与分层 LoRA 的组合(参考图定角色 + Style LoRA 定画风)是否可叠加——探索项。
+- `ReferenceLatent` 对 FLUX.2-dev 的确切接线(单张 vs 多张串接)与身份保持强度——**GPU 实测**。
+- 参考图 + Style LoRA 叠加(参考图定角色 + LoRA 定画风)——探索项。
+- 若需 4 步极速交互再评估 Klein-KV 备选路径。
