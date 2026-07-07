@@ -98,7 +98,7 @@ python3 poc/scripts/03_upload_dataset.py
 # 4. 训练(ctl.py + 长驻实例)
 python3 poc/scripts/ctl.py start           # 启动并等待 SSM 就绪
 python3 poc/scripts/ctl.py train --layer style   # 分层训练:style / char
-python3 poc/scripts/ctl.py logs train
+python3 poc/scripts/ctl.py logs            # 查训练日志
 python3 poc/scripts/ctl.py stop            # 停机(EBS + 模型缓存保留)
 
 # 5. 推理(独立 ComfyUI 实例)
@@ -124,6 +124,8 @@ python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo # 出
 | 优化器 / LR | adamw8bit / 1e-4 cosine | |
 
 **显存管理**:峰值出现在 `prepare_accelerator` 阶段——transformer 与 Mistral 同时驻留 GPU 达约 44GB,超 46GB 上限。两个 patch(见 [`patch_flux2_te.py`](poc/docker/patch_flux2_te.py))解决:① Mistral 在 CPU 量化后再上 GPU;② prepare 前将 Mistral 卸载至 CPU(已缓存 embedding,训练无需其常驻)。卸载后训练显存稳定于约 36GB。配套:`--shm-size=24g`、`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`、HF 缓存挂载 EBS。
+
+> 💡 CPU offload 本质是**时间换空间**:权重在显存↔内存间搬运(走 PCIe),关键在"搬得准"(卸载一次性/长时间闲置的组件)而非"搬得多"。为什么扩散多模态适合、稠密 LLM 是无奈之举 → **[CPU Offload 原理与适用性](docs/engineering/cpu-offload.md)**。
 
 ---
 
