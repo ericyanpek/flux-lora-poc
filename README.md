@@ -82,10 +82,7 @@
 ## 快速开始
 
 ```bash
-# 0. 前置 + 配置
-#    (1) 在 HF 网页分别申请 FLUX.2-dev 与 Mistral 编码器的 gated 访问权限
-#    (2) 将密钥写入 SSM(01 脚本会创建参数,值需手动填):
-#        /flux-poc/hf-token(必需)、/flux-poc/wandb-key(可选,监控用)
+# 0. 前置 + 配置(首次部署必读下方「前置准备」,含 HF gated / 密钥 / Docker Hub)
 cp poc/.env.example poc/.env               # AWS 账号 / region / subnet / AMI / 数据集 / 实例 ID
 
 # 1. 基础设施(S3 + ECR + IAM + CodeBuild,一次性)
@@ -122,6 +119,52 @@ python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo
 ```
 
 `04_submit_training.py` / `05_monitor.py` 为早期单次运行脚本;推荐 `ctl.py` + 长驻实例(模型缓存在 EBS,start 后秒级可用)。`08_demo_matrix.py` 为早期 diffusers 版出图路径,单卡会 segfault/OOM,已由上面的 ComfyUI 路径取代。
+
+### 前置准备(首次部署)
+
+> `01_setup_infra.py` 只**授予** IAM 读取 `/flux-poc/*` 的权限,**不创建密钥**——下列密钥需你手动写入。密钥均位于 `AWS_REGION`(us-east-1)。
+
+**① HuggingFace(必需)——训练/推理都要下载 gated 模型**
+
+1. 登录 HF,在两个模型页分别点 "Agree and access" 申请访问(缺任一项 token 有效也下不动):
+   - [`black-forest-labs/FLUX.2-dev`](https://huggingface.co/black-forest-labs/FLUX.2-dev)
+   - FLUX.2 依赖的 Mistral 编码器 `Mistral-Small-3.x-24B`(BFL 官方为 `Mistral-Small-3.2-24B-Instruct-2506`)
+2. 在 https://huggingface.co/settings/tokens 生成一个 **read** 权限 token(形如 `hf_...`)。
+3. 写入 SSM(SecureString):
+   ```bash
+   aws ssm put-parameter --region us-east-1 \
+     --name /flux-poc/hf-token --type SecureString \
+     --value "hf_你的token" --overwrite
+   ```
+4. 验证(这正是训练机开机时执行的同一条命令):
+   ```bash
+   aws ssm get-parameter --region us-east-1 --name /flux-poc/hf-token \
+     --with-decryption --query Parameter.Value --output text
+   ```
+
+**② W&B(可选)——训练曲线监控,不填则训练照跑、仅跳过上报**
+
+```bash
+aws ssm put-parameter --region us-east-1 \
+  --name /flux-poc/wandb-key --type SecureString \
+  --value "你的wandb_key" --overwrite
+```
+
+**③ Docker Hub(仅「第 2 步构建镜像」需要;复用已有镜像可跳过)**
+
+CodeBuild 构建时会 `docker pull` 基础镜像,匿名拉取受 Docker Hub 匿名限流(429),故用一对账号凭证登录。⚠️ 注意两点(与上面的 HF/W&B 不同):
+
+- 凭证走的是 **AWS Secrets Manager**,不是 SSM(见 [`buildspec.yml`](poc/buildspec.yml) 的 `secrets-manager:` 段,格式 `<secret>:<json-key>`)。
+- 凭证获取:登录 [Docker Hub](https://hub.docker.com) → Account Settings → Personal access tokens → 新建一个 **Read-only** token,用作下面的 `password`(用户名为你的 Docker Hub 账号名)。
+
+```bash
+# 创建含 username/password 两个键的 secret
+aws secretsmanager create-secret --region us-east-1 \
+  --name /flux-poc/dockerhub \
+  --secret-string '{"username":"你的dockerhub用户名","password":"你的access-token"}'
+```
+
+> 已知缺口:`01_setup_infra.py` 给 CodeBuild role 的 inline policy 目前只含 ECR + CloudWatch Logs,**未包含 `secretsmanager:GetSecretValue`**。首次构建若报无权读取 secret,需给 `flux-poc-codebuild-role` 补一条允许读取该 secret 的策略。
 
 ---
 
