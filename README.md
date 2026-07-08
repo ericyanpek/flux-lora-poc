@@ -98,7 +98,8 @@ python3 poc/scripts/06_prepare_layers.py   # 分层训练必需:同批图生成 
 #   ↑ 不跑 06,--layer style/char 会 sync 到空的 S3 前缀而训练失败
 
 # 4. 训练(ctl.py + 长驻实例)
-python3 poc/scripts/ctl.py start                 # 启动并等待 SSM 就绪
+python3 poc/scripts/provision_training.py        # 首次:建长驻训练机(g6e.4xlarge/350GB),自动写回 .env
+python3 poc/scripts/ctl.py start                 # 启动并等待 SSM 就绪(后续复用只需 start)
 python3 poc/scripts/ctl.py train                 # 基础单层(触发词 SLOTIP)
 python3 poc/scripts/ctl.py train --layer style   # 分层:style(触发词 slotstyle)
 python3 poc/scripts/ctl.py train --layer char    # 分层:char(触发词 slotchar)
@@ -224,6 +225,7 @@ poc/
 │   └── patch_flux2_te.py     两个 patch:① Mistral CPU 量化后上 GPU ② prepare 前卸载 TE
 └── scripts/
     ├── ctl.py                生命周期 CLI(start/stop/status/train --layer/logs)
+    ├── provision_training.py 首次建长驻训练机(g6e.4xlarge/350GB EBS,写回 .env)
     ├── 01_setup_infra.py     S3 + ECR + IAM(最小权限)+ CodeBuild
     ├── 02_trigger_build.py   触发 CodeBuild
     ├── 03_upload_dataset.py  上传数据集
