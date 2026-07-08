@@ -137,6 +137,7 @@ python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo
 | 量化 | fp8 + low_vram | transformer / Mistral 均 CPU 量化后上 GPU(patch1) |
 | 文本编码 | cache + unload | 缓存 embedding 后于 prepare 前卸载 Mistral(patch2) |
 | 优化器 / LR | adamw8bit / 1e-4 cosine | |
+| 训练耗时 | 约 4s/step(单卡 L40S) | Style 层 1800 步约 2h、Character 层 1200 步约 1.3h;另每次开机含 ~18–20min 模型加载 + fp8 量化 |
 
 **显存管理**:峰值出现在 `prepare_accelerator` 阶段——transformer 与 Mistral 同时驻留 GPU 达约 44GB,超 46GB 上限。两个 patch(见 [`patch_flux2_te.py`](poc/docker/patch_flux2_te.py))解决:① Mistral 在 CPU 量化后再上 GPU;② prepare 前将 Mistral 卸载至 CPU(已缓存 embedding,训练无需其常驻)。卸载后训练显存稳定于约 36GB。配套:`--shm-size=24g`、`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`、HF 缓存挂载 EBS。
 
