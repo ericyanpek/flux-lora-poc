@@ -82,7 +82,10 @@
 ## 快速开始
 
 ```bash
-# 0. 配置
+# 0. 前置 + 配置
+#    (1) 在 HF 网页分别申请 FLUX.2-dev 与 Mistral 编码器的 gated 访问权限
+#    (2) 将密钥写入 SSM(01 脚本会创建参数,值需手动填):
+#        /flux-poc/hf-token(必需)、/flux-poc/wandb-key(可选,监控用)
 cp poc/.env.example poc/.env               # AWS 账号 / region / subnet / AMI / 数据集 / 实例 ID
 
 # 1. 基础设施(S3 + ECR + IAM + CodeBuild,一次性)
@@ -92,21 +95,33 @@ python3 poc/scripts/01_setup_infra.py
 # 2. 构建训练镜像(CodeBuild,约 8–10 min)
 python3 poc/scripts/02_trigger_build.py
 
-# 3. 上传数据集
-python3 poc/scripts/03_upload_dataset.py
+# 3. 数据准备(图 + 同名 .txt caption)
+python3 poc/scripts/03_upload_dataset.py   # 基础单层:详细 caption + 触发词 SLOTIP
+python3 poc/scripts/06_prepare_layers.py   # 分层训练必需:同批图生成 style/char 两套 caption
+#   ↑ 不跑 06,--layer style/char 会 sync 到空的 S3 前缀而训练失败
 
 # 4. 训练(ctl.py + 长驻实例)
-python3 poc/scripts/ctl.py start           # 启动并等待 SSM 就绪
-python3 poc/scripts/ctl.py train --layer style   # 分层训练:style / char
-python3 poc/scripts/ctl.py logs            # 查训练日志
-python3 poc/scripts/ctl.py stop            # 停机(EBS + 模型缓存保留)
+python3 poc/scripts/ctl.py start                 # 启动并等待 SSM 就绪
+python3 poc/scripts/ctl.py train                 # 基础单层(触发词 SLOTIP)
+python3 poc/scripts/ctl.py train --layer style   # 分层:style(触发词 slotstyle)
+python3 poc/scripts/ctl.py train --layer char    # 分层:char(触发词 slotchar)
+python3 poc/scripts/ctl.py logs                  # 查训练日志
+python3 poc/scripts/ctl.py stop                  # 停机(EBS + 模型缓存保留)
 
-# 5. 推理(独立 ComfyUI 实例)
-python3 poc/scripts/07_deploy_comfyui.py                                  # 部署,自动拉取最新 LoRA
-python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo # 出图
+# 5. 推理 + 出对照矩阵(独立 ComfyUI 实例)
+python3 poc/scripts/07_deploy_comfyui.py         # 部署,自动拉取最新 style/char LoRA
+#   ↑ 首次约 15–20 min;就绪后按脚本打印的命令做 SSM 端口转发(本地 8188 → 实例 8188)
+#   随后在推理机上依次跑四个配置,每个覆盖 3 主题,合起来即 3×4 对照矩阵:
+python3 poc/scripts/inference/comfy_gen.py --config base  --out /exp/base
+python3 poc/scripts/inference/comfy_gen.py --config style --out /exp/style
+python3 poc/scripts/inference/comfy_gen.py --config char  --out /exp/char
+python3 poc/scripts/inference/comfy_gen.py --config combo --out /exp/combo
+
+# 6. 结果评估与展示
+#   对照矩阵结论与对照图 → docs/experiments/layered-lora-results.md
 ```
 
-`04_submit_training.py` / `05_monitor.py` 为早期单次运行脚本;推荐 `ctl.py` + 长驻实例(模型缓存在 EBS,start 后秒级可用)。
+`04_submit_training.py` / `05_monitor.py` 为早期单次运行脚本;推荐 `ctl.py` + 长驻实例(模型缓存在 EBS,start 后秒级可用)。`08_demo_matrix.py` 为早期 diffusers 版出图路径,单卡会 segfault/OOM,已由上面的 ComfyUI 路径取代。
 
 ---
 
