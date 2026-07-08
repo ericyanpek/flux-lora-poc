@@ -154,7 +154,7 @@ aws ssm put-parameter --region us-east-1 \
 
 CodeBuild 构建时会 `docker pull` 基础镜像,匿名拉取受 Docker Hub 匿名限流(429),故用一对账号凭证登录。⚠️ 注意两点(与上面的 HF/W&B 不同):
 
-- 凭证走的是 **AWS Secrets Manager**,不是 SSM(见 [`buildspec.yml`](poc/buildspec.yml) 的 `secrets-manager:` 段,格式 `<secret>:<json-key>`)。
+- 凭证走的是 **AWS Secrets Manager**,不是 SSM(见 [`buildspec.yml`](poc/buildspec.yml) 的 `secrets-manager:` 段,格式 `<secret>:<json-key>`)。CodeBuild role 读取 `/flux-poc/*` secret 的权限已由 `01_setup_infra.py` 自动授予。
 - 凭证获取:登录 [Docker Hub](https://hub.docker.com) → Account Settings → Personal access tokens → 新建一个 **Read-only** token,用作下面的 `password`(用户名为你的 Docker Hub 账号名)。
 
 ```bash
@@ -163,8 +163,6 @@ aws secretsmanager create-secret --region us-east-1 \
   --name /flux-poc/dockerhub \
   --secret-string '{"username":"你的dockerhub用户名","password":"你的access-token"}'
 ```
-
-> 已知缺口:`01_setup_infra.py` 给 CodeBuild role 的 inline policy 目前只含 ECR + CloudWatch Logs,**未包含 `secretsmanager:GetSecretValue`**。首次构建若报无权读取 secret,需给 `flux-poc-codebuild-role` 补一条允许读取该 secret 的策略。
 
 ---
 

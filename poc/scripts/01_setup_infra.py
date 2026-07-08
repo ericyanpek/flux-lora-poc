@@ -155,6 +155,14 @@ def create_codebuild_project():
                     f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:{CW_LOG_GROUP}:log-stream:*",
                 ],
             },
+            {
+                # buildspec.yml pulls Docker Hub creds via secrets-manager:
+                # /flux-poc/dockerhub (avoids anonymous-pull 429). Secret name
+                # gets a random 6-char suffix, so scope by name prefix wildcard.
+                "Effect": "Allow",
+                "Action": ["secretsmanager:GetSecretValue"],
+                "Resource": f"arn:aws:secretsmanager:{REGION}:{ACCOUNT}:secret:/flux-poc/*",
+            },
         ],
     })
     iam.put_role_policy(
