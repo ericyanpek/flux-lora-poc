@@ -195,6 +195,38 @@ aws secretsmanager create-secret --region us-east-1 \
 - **LoRA 兼容性已验证**:ai-toolkit bf16 rank-32 LoRA 在 fp8 底模上直接加载生效,无 key mismatch / Float8 报错。
 - 设计见 [`docs/superpowers/specs/2026-06-28-comfyui-inference-design.md`](docs/superpowers/specs/2026-06-28-comfyui-inference-design.md)。
 
+### ComfyUI 使用手册(部署 + 三种出图方式)
+
+**① 部署推理机**(`07_deploy_comfyui.py`,自动从 S3 拉最新 SUCCESS 的 LoRA):
+
+```bash
+python3 poc/scripts/07_deploy_comfyui.py                 # 默认:style + char(分层组合)
+python3 poc/scripts/07_deploy_comfyui.py --layers style  # 单 LoRA(只拉 style 层)
+python3 poc/scripts/07_deploy_comfyui.py --layers slotip # 单 LoRA(base 路径产物 lora-slotip-*)
+```
+
+`--layers` 的层名 = `outputs/lora-<层>-*` 前缀。某层无 SUCCESS 产物时**软跳过**(不再整脚本失败);仅当**零层**加载才报错(除非 `ALLOW_BASE=1` 跑纯底模)。就绪后按脚本打印的命令做 **SSM 端口转发(本地 8188 → 实例 8188)**。
+
+**② 三种出图方式**(部署后,端口转发已开):
+
+| 方式 | 适用 | 怎么做 |
+|------|------|--------|
+| **ComfyUI 网页**(交互式) | 边改 prompt 边看、调权重/seed、随手试 | 浏览器开 `http://localhost:8188`,手搭节点(参考 `comfy_gen.py` 的 workflow 结构),LoRA 已在 `models/loras/` 下,触发词写进 prompt 生效 |
+| **预设批量**(可复现对照) | 固定 seed、批量、3×4 对照矩阵 | `comfy_gen.py --config base\|style\|char\|combo --out /exp/<cfg>`,对内置 THEMES 批量出图 |
+| **自定义 prompt**(命令行单图) | 命令行带自己的任意提示词快速出图 | 见下 |
+
+```bash
+# 自定义:任意 prompt(原样使用,触发词自己写进去)+ 任意 LoRA 组合,出单图
+python3 poc/scripts/inference/comfy_gen.py \
+  --prompt "slotstyle, a cyberpunk fox on a slot panel, gold coins" \
+  --lora slotstyle.safetensors:1.0 --out /exp/custom
+
+# --lora 可重复叠加、可带权重(:后为权重,默认1.0);不带 --lora = 纯底模对照
+python3 poc/scripts/inference/comfy_gen.py --prompt "a plain castle" --out /exp/base-custom
+```
+
+`--config`(预设批量)与 `--prompt`(自定义单图)二选一;`--seed` 可覆盖默认 42。
+
 **第二条互补主线(🟡 部分验证)**:FLUX.2 底模原生支持多参考图(无需训练),面向主体一致性(同一主体跨场景)。已在 ComfyUI(`ReferenceLatent` 节点)实跑 [`09_multiref_infer.py`](poc/scripts/inference/09_multiref_infer.py):**角色身份保持极好,但场景跟随待调优**(参考图注入权重过高,压制了 prompt 场景控制;非能力缺失,详见[设计文档](docs/superpowers/specs/2026-06-30-multiref-inference-design.md)第 0 节)。
 
 **生产在线 API**:建议 g7e RTX PRO 6000 96GB 使编码器 + transformer + VAE 全常驻;缺货期以 L40S + SageMaker Async 队列过渡。详见双栈规划。

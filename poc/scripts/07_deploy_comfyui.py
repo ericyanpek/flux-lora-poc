@@ -2,8 +2,19 @@
 Launches a g6e.4xlarge EC2 inference instance running ComfyUI with FLUX.2-dev fp8 models.
 UserData handles: ComfyUI install, fp8 model fetch (S3-first, HF fallback), LoRA sync, startup.
 Instance is persistent (no auto-shutdown) — access via SSM port forwarding on port 8188.
-Run: python3 07_deploy_comfyui.py
+
+Run:
+  python3 07_deploy_comfyui.py                       # default: style + char (分层组合)
+  python3 07_deploy_comfyui.py --layers style        # 单 LoRA(只拉 style)
+  python3 07_deploy_comfyui.py --layers slotip        # 单 LoRA(base 路径产物 lora-slotip-*)
+  python3 07_deploy_comfyui.py --layers style char   # 显式指定多层
+
+Each layer resolves the latest SUCCESS run at outputs/lora-<layer>-*/ and lands at
+models/loras/<layer>.safetensors. A missing layer is soft-skipped; hard error only if
+zero layers loaded (unless ALLOW_BASE=1). Use the same <layer> name as --config in
+comfy_gen.py (e.g. deploy --layers style → comfy_gen --config style).
 """
+import argparse
 import base64
 import boto3
 import datetime
@@ -39,7 +50,16 @@ def get_or_create_security_group(ec2, vpc_id: str) -> str:
     return sg_id
 
 
-def build_userdata() -> str:
+def build_userdata(lora_specs) -> str:
+    # lora_specs: list of (prefix, dest_basename). Each layer is fetched independently;
+    # a missing layer is SOFT-skipped (warn + continue) so single-LoRA deploys work.
+    # Hard error only if ZERO LoRAs loaded (unless ALLOW_BASE=1) — a ComfyUI that
+    # silently came up with no adapter at all is worse than a loud failure.
+    fetch_lines = "\n".join(
+        f'fetch_latest_lora "{prefix}" "models/loras/{dest}" '
+        f'&& LOADED=$((LOADED+1)) || echo "  layer {prefix} not found — skipped"'
+        for prefix, dest in lora_specs
+    )
     script = f"""#!/bin/bash
 set -euo pipefail
 exec > /var/log/comfyui-setup.log 2>&1
@@ -116,7 +136,7 @@ fetch_model \
 # LoRAs from training outputs (S3 only — no HF fallback).
 # Resolve the latest SUCCESSFUL run per layer, so a new training run is picked up
 # with no code change. ai-toolkit writes each run to
-# outputs/lora-<layer>-<timestamp>/{flux-lora-poc.safetensors, status.txt}.
+# outputs/lora-<layer>-<timestamp>/{{flux-lora-poc.safetensors, status.txt}}.
 #
 # CURRENT CONTRACT (POC): latest-SUCCESS-by-S3-LastModified. This is the actual
 # training→inference coordination mechanism today. The W&B Artifacts + S3 manifest
@@ -128,11 +148,12 @@ fetch_model \
 #      never be auto-promoted).
 #   2. Order by S3 LastModified (monotonic, API-provided) rather than parsing the
 #      timestamp out of the prefix name (which assumes single-writer/same-timezone).
-#   3. Missing LoRA is a HARD ERROR (exit 1) unless ALLOW_BASE=1 — a ComfyUI that
-#      silently came up with no adapter is worse than a loud failure.
+#   3. Per-layer miss is SOFT (warn + skip) so single-LoRA deploys work; a HARD
+#      error (exit 1) fires only if ZERO layers loaded, unless ALLOW_BASE=1.
 echo "Resolving latest SUCCESSFUL LoRA runs from S3..."
+LOADED=0
 fetch_latest_lora() {{
-    local LAYER="$1"       # style | char
+    local LAYER="$1"       # e.g. style | char | slotip
     local DEST="$2"
     # List run prefixes for this layer, newest-first by LastModified.
     local PREFIXES
@@ -150,15 +171,14 @@ fetch_latest_lora() {{
         fi
         echo "  skip $RUN (status=$ST)"
     done
-    if [ "${{ALLOW_BASE:-0}}" = "1" ]; then
-        echo "WARN: no successful lora-$LAYER-* run; ALLOW_BASE=1 set, continuing without $LAYER LoRA"
-        return 0
-    fi
-    echo "ERROR: no successful lora-$LAYER-* run found in s3://$BUCKET/outputs/ (set ALLOW_BASE=1 to run base-only)"
-    exit 1
+    return 1   # not found — caller decides (soft-skip)
 }}
-fetch_latest_lora "style" "models/loras/slotstyle.safetensors"
-fetch_latest_lora "char"  "models/loras/slotchar.safetensors"
+{fetch_lines}
+if [ "$LOADED" -eq 0 ] && [ "${{ALLOW_BASE:-0}}" != "1" ]; then
+    echo "ERROR: no successful LoRA run found for any requested layer (set ALLOW_BASE=1 to run base-only)"
+    exit 1
+fi
+echo "LoRAs loaded: $LOADED"
 
 # 4. Start ComfyUI (SSM port forwarding; --lowvram offloads layers to save VRAM)
 nohup venv/bin/python main.py --listen 127.0.0.1 --port 8188 --lowvram > /var/log/comfyui.log 2>&1 &
@@ -168,12 +188,12 @@ echo "=== Setup complete $(date) ==="
     return base64.b64encode(script.encode()).decode()
 
 
-def launch_instance() -> str:
+def launch_instance(lora_specs) -> str:
     ec2 = boto3.client("ec2", region_name=REGION)
 
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     instance_name = f"comfyui-infer-{ts}"
-    userdata = build_userdata()
+    userdata = build_userdata(lora_specs)
 
     resp = None
     for subnet_id in SUBNET_CANDIDATES:
@@ -258,4 +278,17 @@ def launch_instance() -> str:
 
 
 if __name__ == "__main__":
-    launch_instance()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--layers", nargs="+", default=["style", "char"],
+                    help="要拉取的 LoRA 层名(= outputs/lora-<层>-* 前缀,也 = comfy_gen --config)。"
+                         "默认 style char;单 LoRA 传单个,如 --layers style 或 --layers slotip")
+    args = ap.parse_args()
+    # 落地文件名需与 comfy_gen.py 的 LoRA 引用一致:
+    #   style -> slotstyle.safetensors, char -> slotchar.safetensors(comfy_gen 内置默认)
+    #   其它层 -> <层>.safetensors,配合 comfy_gen.py --lora <文件名> 使用
+    DEST_NAME = {"style": "slotstyle.safetensors", "char": "slotchar.safetensors"}
+    lora_specs = [(layer, DEST_NAME.get(layer, f"{layer}.safetensors")) for layer in args.layers]
+    print(f"Deploying ComfyUI with LoRA layers: {', '.join(args.layers)}")
+    for layer, dest in lora_specs:
+        print(f"   {layer:12s} -> models/loras/{dest}")
+    launch_instance(lora_specs)

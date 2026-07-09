@@ -15,11 +15,17 @@ FLUX.2 workflow 关键节点(已由 comfy_probe.py 确认):
   KSampler(model, pos, neg, latent, seed, steps, cfg=1.0, sampler, scheduler) -> LATENT
   VAEDecode -> IMAGE -> SaveImage(prefix)
 
-用法:
+用法(两种模式二选一):
+  # 预设模式:CONFIGS × THEMES 批量出图,固定 seed,做可复现对照矩阵
   comfy_gen.py --config base   --out /exp/base
   comfy_gen.py --config style  --out /exp/style
   comfy_gen.py --config char   --out /exp/char
   comfy_gen.py --config combo  --out /exp/combo
+
+  # 自定义模式:任意 prompt(原样使用,触发词自己写)+ 任意 LoRA 组合,出单图
+  comfy_gen.py --prompt "slotstyle, a cyberpunk fox, gold coins" \
+               --lora slotstyle.safetensors:1.0 --out /exp/custom
+  comfy_gen.py --prompt "a plain castle" --out /exp/base-custom   # 不带 --lora = 纯底模
 """
 import argparse, json, os, time, urllib.request, urllib.error, urllib.parse, uuid
 
@@ -63,8 +69,10 @@ def build_prompt(theme_body, use_style, use_char):
     return f"{prefix}{theme_body}, {TAIL}"
 
 
-def build_workflow(prompt_text, use_style, use_char, ws, wc, seed, out_prefix):
-    """返回 ComfyUI API 格式的 prompt graph(dict of nodes)。"""
+def build_workflow(prompt_text, loras, seed, out_prefix):
+    """返回 ComfyUI API 格式的 prompt graph(dict of nodes)。
+    loras: [(lora_name, weight), ...] —— 按顺序串接,weight<=0 的跳过。
+    空列表 = 纯底模(base)。"""
     g = {}
     g["1"] = {"class_type": "UNETLoader",
               "inputs": {"unet_name": UNET, "weight_dtype": "fp8_e4m3fn"}}
@@ -77,18 +85,12 @@ def build_workflow(prompt_text, use_style, use_char, ws, wc, seed, out_prefix):
 
     # 串接 LoRA(每个 LoraLoader 同时改 MODEL + CLIP)
     nid = 10
-    if use_style and ws > 0:
+    for lora_name, w in loras:
+        if w <= 0:
+            continue
         g[str(nid)] = {"class_type": "LoraLoader",
-                       "inputs": {"lora_name": LORA_STYLE,
-                                  "strength_model": ws, "strength_clip": ws,
-                                  "model": model_out, "clip": clip_out}}
-        model_out = [str(nid), 0]
-        clip_out = [str(nid), 1]
-        nid += 1
-    if use_char and wc > 0:
-        g[str(nid)] = {"class_type": "LoraLoader",
-                       "inputs": {"lora_name": LORA_CHAR,
-                                  "strength_model": wc, "strength_clip": wc,
+                       "inputs": {"lora_name": lora_name,
+                                  "strength_model": w, "strength_clip": w,
                                   "model": model_out, "clip": clip_out}}
         model_out = [str(nid), 0]
         clip_out = [str(nid), 1]
@@ -164,23 +166,28 @@ def collect(entry, out_dir):
     return saved
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--config", required=True, choices=list(CONFIGS))
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--themes", default="pirate,dragon,mermaid")
-    args = ap.parse_args()
+def config_to_loras(config):
+    """把预设 config 翻译成 build_workflow 需要的 [(lora_name, weight), ...]。"""
+    use_style, use_char, ws, wc = CONFIGS[config]
+    loras = []
+    if use_style:
+        loras.append((LORA_STYLE, ws))
+    if use_char:
+        loras.append((LORA_CHAR, wc))
+    return loras
 
-    use_style, use_char, ws, wc = CONFIGS[args.config]
-    client_id = str(uuid.uuid4())
+
+def run_preset(args, client_id):
+    """预设模式:CONFIGS × THEMES 批量出图(可复现对照矩阵)。"""
+    use_style, use_char, _, _ = CONFIGS[args.config]
+    loras = config_to_loras(args.config)
     themes = args.themes.split(",")
-
     all_saved = []
     for theme in themes:
         body = THEMES[theme]
         prompt_text = build_prompt(body, use_style, use_char)
         prefix = f"{theme}__{args.config}"
-        graph = build_workflow(prompt_text, use_style, use_char, ws, wc, SEED, prefix)
+        graph = build_workflow(prompt_text, loras, args.seed, prefix)
         print(f"[{args.config}/{theme}] prompt: {prompt_text}", flush=True)
         pid = submit(graph, client_id)
         print(f"  submitted {pid}, waiting...", flush=True)
@@ -188,10 +195,57 @@ def main():
         saved = collect(entry, args.out)
         print(f"  saved: {saved}", flush=True)
         all_saved += saved
-
     print(f"\n=== {args.config}: {len(all_saved)} images in {args.out} ===", flush=True)
     for s in all_saved:
         print(" ", s)
+
+
+def run_custom(args, client_id):
+    """自定义模式:用户任意 prompt + 任意 LoRA 组合出一张图。
+    prompt 原样使用(不追加 THEMES/TAIL);触发词由用户自行写进 prompt。"""
+    # --lora name:weight 可多次;省略则纯底模(base)
+    loras = []
+    for spec in (args.lora or []):
+        if ":" in spec:
+            name, w = spec.rsplit(":", 1)
+            loras.append((name, float(w)))
+        else:
+            loras.append((spec, 1.0))
+    graph = build_workflow(args.prompt, loras, args.seed, "custom")
+    lora_desc = ", ".join(f"{n}@{w}" for n, w in loras) or "(base, no LoRA)"
+    print(f"[custom] loras: {lora_desc}", flush=True)
+    print(f"[custom] prompt: {args.prompt}", flush=True)
+    pid = submit(graph, client_id)
+    print(f"  submitted {pid}, waiting...", flush=True)
+    entry = wait(pid)
+    saved = collect(entry, args.out)
+    print(f"\n=== custom: {len(saved)} images in {args.out} ===", flush=True)
+    for s in saved:
+        print(" ", s)
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="ComfyUI 出图。两种模式:预设(--config,批量对照矩阵)或自定义(--prompt,单图任意提示词)。")
+    ap.add_argument("--config", choices=list(CONFIGS),
+                    help="预设模式:base/style/char/combo,对 --themes 批量出图")
+    ap.add_argument("--prompt", help="自定义模式:任意提示词(原样使用,触发词自己写进去),出单图")
+    ap.add_argument("--lora", action="append",
+                    help="自定义模式的 LoRA,格式 文件名[:权重](默认权重1.0),可重复。"
+                         "例:--lora slotstyle.safetensors:0.9 --lora slotchar.safetensors:0.8")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--themes", default="pirate,dragon,mermaid", help="预设模式的主题(逗号分隔)")
+    ap.add_argument("--seed", type=int, default=SEED, help=f"随机种子(默认 {SEED})")
+    args = ap.parse_args()
+
+    if bool(args.config) == bool(args.prompt):
+        ap.error("二选一:--config(预设批量)或 --prompt(自定义单图)")
+
+    client_id = str(uuid.uuid4())
+    if args.prompt:
+        run_custom(args, client_id)
+    else:
+        run_preset(args, client_id)
 
 
 if __name__ == "__main__":
