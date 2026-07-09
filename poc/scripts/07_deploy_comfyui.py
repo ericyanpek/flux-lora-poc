@@ -87,6 +87,13 @@ pip install --upgrade pip
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 
+# ComfyUI's requirements pull a CUDA-13 torchaudio (libcudart.so.13 not found) that
+# mismatches our cu124 torch — torchaudio is imported indirectly by comfy.sd, so
+# ComfyUI crashes on startup. Pin it back to cu124 AFTER requirements. --no-deps so
+# it doesn't drag torch along; --index-url is REQUIRED (plain ==2.6.0 won't get cu124).
+pip install --force-reinstall --no-deps torchaudio==2.6.0+cu124 \
+    --index-url https://download.pytorch.org/whl/cu124
+
 # 2. Create model directories
 mkdir -p models/diffusion_models models/text_encoders models/vae models/loras
 
