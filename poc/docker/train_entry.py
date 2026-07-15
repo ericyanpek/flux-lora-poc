@@ -24,7 +24,7 @@ def load_hyperparameters():
             raw = json.load(f)
         hp = {k: v.strip('"') if isinstance(v, str) else v for k, v in raw.items()}
     # env vars override file (EC2 mode)
-    for key in ["trigger_word", "model_name", "steps", "lr", "rank", "sample_every", "layer", "project_name"]:
+    for key in ["trigger_word", "model_name", "steps", "lr", "rank", "sample_every", "layer", "project_name", "resolution"]:
         env_val = os.environ.get(key.upper())
         if env_val:
             hp[key] = env_val
@@ -40,8 +40,23 @@ def build_config(hp: dict) -> dict:
     model_name = hp.get("model_name", "black-forest-labs/FLUX.2-dev")
     wandb_key = os.environ.get("WANDB_API_KEY", "")
 
+    # resolution: 逗号分隔支持多分辨率 bucket(ai-toolkit 会按 list 各训一遍)。
+    # 默认 640(保持 slot 训练不变);icon 传 "640,1024" 做动态分辨率。
+    res_raw = str(hp.get("resolution", "640"))
+    resolution = [int(x) for x in res_raw.split(",") if x.strip()]
+    # sample 尺寸用最大分辨率(1024 图标细节更清晰)
+    sample_dim = max(resolution)
+
     layer = hp.get("layer", "")
-    if layer == "style":
+    if layer == "icon":
+        # 中国风 Q版图标风格 LoRA:验证画风是否泛化到训练集外的新道具主体
+        sample_prompts = [
+            f"{trigger_word}, a sword, glossy material, isolated on white background",
+            f"{trigger_word}, a treasure map scroll, glossy material, isolated on white background",
+            f"{trigger_word}, a jade ring, dominant green with gold accents, isolated on white background",
+            "a sword icon, isolated on white background",
+        ]
+    elif layer == "style":
         sample_prompts = [
             f"{trigger_word}, a treasure chest full of gold coins",
             f"{trigger_word}, a fierce dragon mascot",
@@ -105,8 +120,8 @@ def build_config(hp: dict) -> dict:
         },
         "sample": {
             "sample_every": sample_every,
-            "width": 640,
-            "height": 640,
+            "width": sample_dim,
+            "height": sample_dim,
             "prompts": sample_prompts,
             "neg": "",
             "seed": 42,
@@ -117,7 +132,7 @@ def build_config(hp: dict) -> dict:
         "datasets": [{
             "folder_path": TRAINING_DATA_PATH,
             "caption_ext": "txt",
-            "resolution": [640, 640],         # 640 (was 768): more VRAM headroom on L40S 46GB, avoid prepare-stage OOM
+            "resolution": resolution,         # list → ai-toolkit 多分辨率 bucket(如 [640,1024]);默认 [640]
             "default_caption": f"{trigger_word}",
             "cache_latents_to_disk": True,    # precompute VAE latents
             "cache_text_embeddings": True,    # precompute Mistral embeddings, then unload encoder

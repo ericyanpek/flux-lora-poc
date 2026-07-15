@@ -124,15 +124,26 @@ def cmd_train(args):
     _ensure_running()
     ts = time.strftime("%Y%m%d-%H%M%S")
     layer = getattr(args, "layer", None)
-    if layer == "style":
-        prefix, trigger, job = "datasets/slot-ip-v1-style/", "slotstyle", f"style-{ts}"
-    elif layer == "char":
-        prefix, trigger, job = "datasets/slot-ip-v1-char/", "slotchar", f"char-{ts}"
+    # 每个 layer: (S3 数据前缀, 触发词, job 名前缀, 容器内 LAYER(决定 sample prompts), 分辨率)
+    # icon 三组(caption 对照实验)共用 LAYER=icon 的 sample prompts + 多分辨率 [640,1024];
+    # 数据前缀/触发词/job 各不同,以便三个 LoRA 独立产出、推理时对比。
+    LAYERS = {
+        "style":       ("datasets/slot-ip-v1-style/", "slotstyle", "style",       "style", "640"),
+        "char":        ("datasets/slot-ip-v1-char/",  "slotchar",  "char",        "char",  "640"),
+        "icon-pro":    ("datasets/icon-pro/",         "iconqstyle",  "icon-pro",    "icon",  "640,1024"),
+        "icon-simple": ("datasets/icon-simple/",      "iconqsimple", "icon-simple", "icon",  "640,1024"),
+        "icon-bare":   ("datasets/icon-bare/",        "iconqbare",   "icon-bare",   "icon",  "640,1024"),
+    }
+    if layer in LAYERS:
+        prefix, trigger, jobname, clayer, res = LAYERS[layer]
+        job = f"{jobname}-{ts}"
     else:
-        prefix, trigger, job = DATASET_PREFIX, TRIGGER_WORD, f"slotip-{ts}"
+        prefix, trigger, clayer, res = DATASET_PREFIX, TRIGGER_WORD, "", "640"
+        job = f"slotip-{ts}"
     steps_env = f"-e STEPS={args.steps}" if args.steps else ""
-    layer_env = f"-e LAYER={layer}" if layer else ""
-    print(f"Launching {job} (layer={layer or 'base'}, trigger={trigger}, steps={args.steps or 'default'})...")
+    layer_env = f"-e LAYER={clayer}" if clayer else ""
+    res_env = f"-e RESOLUTION={res}"
+    print(f"Launching {job} (layer={layer or 'base'}, trigger={trigger}, res={res}, steps={args.steps or 'default'})...")
     cmd = (
         f"bash -c 'exec >> /var/log/flux-train-{job}.log 2>&1; "
         f"mkdir -p /tmp/td-{job} /tmp/out-{job} /opt/flux-cache/hf; "
@@ -142,7 +153,7 @@ def cmd_train(args):
         f"HF=$(aws ssm get-parameter --region {S3_REGION} --name /flux-poc/hf-token --with-decryption --query Parameter.Value --output text); "
         f"WB=$(aws ssm get-parameter --region {S3_REGION} --name /flux-poc/wandb-key --with-decryption --query Parameter.Value --output text 2>/dev/null || echo \"\"); "
         f"docker run --gpus all --rm --shm-size=24g -e HF_TOKEN=\"$HF\" -e WANDB_API_KEY=\"$WB\" "
-        f"-e TRIGGER_WORD={trigger} {layer_env} {steps_env} -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+        f"-e TRIGGER_WORD={trigger} {layer_env} {steps_env} {res_env} -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
         f"-e HF_HOME=/root/.cache/huggingface -v /opt/flux-cache/hf:/root/.cache/huggingface "
         f"-v /tmp/td-{job}:/opt/ml/input/data/training -v /tmp/out-{job}:/opt/ml/model {ECR_URI} 2>&1; "
         f"EXIT=$?; "
@@ -198,7 +209,7 @@ if __name__ == "__main__":
     sub.add_parser("start")
     sub.add_parser("stop")
     pt = sub.add_parser("train"); pt.add_argument("--steps", type=int, default=None)
-    pt.add_argument("--layer", choices=["style", "char"], default=None)
+    pt.add_argument("--layer", choices=["style", "char", "icon-pro", "icon-simple", "icon-bare"], default=None)
     pi = sub.add_parser("infer"); pi.add_argument("prompt", nargs="?", default=None)
     sub.add_parser("logs")   # 训练日志(推理在独立 ComfyUI 机)
     pr = sub.add_parser("run"); pr.add_argument("command")
